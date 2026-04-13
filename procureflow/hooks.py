@@ -15,17 +15,31 @@ doctype_js = {
 
 
 
+
+
+
 fixtures = [
+
+    # 🔥 Custom Fields (IMPORTANT)
+    {
+        "doctype": "Custom Field"
+    },
+
+    # 🔥 Property Setter (field hide/show, label change etc)
+
+
+    # 🔥 Client Script
+
+
+    # 🔥 Workflow
     {
         "doctype": "Workflow",
         "filters": [
             ["name", "in", ["PO Approval"]]
         ]
-    }
-]
+    },
 
-
-fixtures = [
+    # 🔥 Print Format
     {
         "doctype": "Print Format",
         "filters": [
@@ -33,6 +47,43 @@ fixtures = [
         ]
     }
 ]
+
+
+
+
+
+
+
+
+
+
+
+# fixtures = [
+#     {
+#         "doctype": "Workflow",
+#         "filters": [
+#             ["name", "in", ["PO Approval"]]
+#         ]
+#     }
+# ]
+
+
+# fixtures = [
+#     {
+#         "doctype": "Print Format",
+#         "filters": [
+#             ["name", "in", ["PO Custom Format"]]
+#         ]
+#     }
+# ]
+
+
+
+
+
+
+
+
 
 # override_whitelisted_methods = {
 
