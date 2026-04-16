@@ -158,7 +158,7 @@ function open_item_popup(frm) {
                 fieldname: 'uom',
                 fieldtype: 'Link',
                 options: 'UOM',
-                read_only: 1
+                read_only: 0
             }
 
         ],
@@ -242,5 +242,38 @@ frappe.ui.form.on('Material Request', {
 
         frm.clear_table("items");
         frm.refresh_field("items");
+    }
+});
+
+
+
+// hide add row button 
+
+
+frappe.ui.form.on('Material Request', {
+    refresh: function(frm) {
+
+        setTimeout(() => {
+
+            let grid = frm.get_field('items').grid;
+
+            // Hide buttons
+            $(grid.wrapper).find('.grid-add-row').hide();
+            $(grid.wrapper).find('.grid-add-multiple-rows').hide();
+
+            // Disable adding rows completely
+            grid.cannot_add_rows = true;
+
+        }, 500); // delay important hai
+    }
+});
+
+// hide Request For Quoataion 
+
+frappe.ui.form.on('Material Request', {
+    refresh: function(frm) {
+
+        // Remove Request for Quotation from Create menu
+        frm.page.remove_inner_button('Request for Quotation', 'Create');
     }
 });

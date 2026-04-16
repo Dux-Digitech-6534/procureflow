@@ -133,7 +133,33 @@ function apply_category_filter(frm) {
 }
 
 
+// child table filter function 
 
+
+frappe.ui.form.on('Purchase Order', {
+
+    refresh: function(frm) {
+
+        console.log("SQ Category Filter Applied");
+
+        frm.set_query("item_code", "items", function(doc, cdt, cdn) {
+
+            if (frm.doc.custom_category) {
+
+                return {
+                    query: "erpnext.controllers.queries.item_query",
+                    filters: {
+                        "custom_category": frm.doc.custom_category
+                    }
+                };
+
+            } else {
+
+                return {};
+            }
+        });
+    }
+});
 
 
 
