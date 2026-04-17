@@ -15,42 +15,47 @@ doctype_js = {
 
 
 
-
-
-
 fixtures = [
 
-    # 🔥 Custom Fields (IMPORTANT)
     {
-        "doctype": "Custom Field"
-    },
-
-    # 🔥 Property Setter (field hide/show, label change etc)
-
-
-    # 🔥 Client Script
-
-
-    # 🔥 Workflow
-    {
-        "doctype": "Workflow",
+        "dt": "Custom Field",
         "filters": [
-            ["name", "in", ["PO Approval"]]
+            ["dt", "in", [
+
+                # Parent Doctypes
+                "Material Request",
+                "Supplier Quotation",
+                "Purchase Order",
+                "Purchase Receipt",
+                "Item",
+
+                # Child Tables 🔥
+                "Material Request Item",
+                "Supplier Quotation Item",
+                "Purchase Order Item",
+                "Purchase Receipt Item"
+
+            ]]
         ]
     },
 
-    # 🔥 Print Format
     {
-        "doctype": "Print Format",
+        "dt": "Workflow",
         "filters": [
-            ["name", "in", ["PO Custom Format"]]
+            ["document_type", "=", "Purchase Order"]
+        ]
+    },
+
+    "Workflow State",
+    "Workflow Action Master",
+
+    {
+        "dt": "Print Format",
+        "filters": [
+            ["doc_type", "=", "Purchase Order"]
         ]
     }
 ]
-
-
-
-
 
 
 
