@@ -30,9 +30,30 @@
  {
   "docstatus": 0,
   "doctype": "Workflow Action Master",
+  "modified": "2026-04-23 21:48:04.117946",
+  "name": "Cancel",
+  "workflow_action_name": "Cancel"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-04-27 12:07:19.940215",
+  "name": "Verify",
+  "workflow_action_name": "Verify"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
   "modified": "2026-04-12 22:52:09.496375",
   "name": "Submit",
   "workflow_action_name": "Submit"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Workflow Action Master",
+  "modified": "2026-04-23 21:47:03.685608",
+  "name": "Re-open",
+  "workflow_action_name": "Re-open"
  },
  {
   "docstatus": 0,
