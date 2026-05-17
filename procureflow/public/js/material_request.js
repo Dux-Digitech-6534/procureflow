@@ -1,6 +1,3 @@
-
-
-
 // blank child table first row 
 
 frappe.ui.form.on('Material Request', {
@@ -80,10 +77,24 @@ frappe.ui.form.on('Material Request', {
                     </div>
                 `);
 
+                // btn.find('button').on('click', function () {
+                //     open_item_popup(frm);
+                // });
+
                 btn.find('button').on('click', function () {
+
+                    if (!frm.doc.custom_category) {
+                        frappe.msgprint({
+                            title: __('Missing Category'),
+                            indicator: 'red',
+                            message: __('Please select Category first')
+                        });
+
+                        return; // Do NOT open popup
+                    }
+
                     open_item_popup(frm);
                 });
-
                 // 👇 Add above grid
                 $(grid.wrapper).prepend(btn);
 
@@ -115,18 +126,46 @@ function open_item_popup(frm) {
                     };
                 },
 
-                // 🔥 FIX: use onchange here
                 onchange: function () {
                     let item = d.get_value('item_code');
 
-                    if (item) {
-                        frappe.db.get_value('Item', item, 'stock_uom')
-                            .then(r => {
-                                if (r.message && r.message.stock_uom) {
-                                    d.set_value('uom', r.message.stock_uom);
-                                }
-                            });
+                    if (!item) {
+                        d.set_value('uom', '');
+                        d.set_value('conversion_factor', '');
+                        return;
                     }
+
+                    // Fetch stock_uom from Item
+                    frappe.db.get_value('Item', item, 'stock_uom')
+                        .then(r => {
+
+                            if (r.message && r.message.stock_uom) {
+
+                                let stock_uom = r.message.stock_uom;
+
+                                // Auto set UOM
+                                d.set_value('uom', stock_uom);
+
+                                // Fetch conversion_factor from UOM Conversion Detail
+                                frappe.db.get_value(
+                                    'UOM Conversion Detail',
+                                    {
+                                        parent: item,
+                                        uom: stock_uom
+                                    },
+                                    'conversion_factor'
+                                ).then(cf => {
+
+                                    if (cf.message && cf.message.conversion_factor) {
+                                        d.set_value('conversion_factor', cf.message.conversion_factor);
+                                    } else {
+                                        // For stock UOM, fallback is usually 1
+                                        d.set_value('conversion_factor', 1);
+                                    }
+
+                                });
+                            }
+                        });
                 }
             },
 
@@ -134,7 +173,7 @@ function open_item_popup(frm) {
                 label: 'Required Date',
                 fieldname: 'schedule_date',
                 fieldtype: 'Date',
-                default: frm.doc.schedule_date,  // 🔥 parent se auto
+                default: frm.doc.schedule_date,
                 reqd: 1
             },
 
@@ -151,14 +190,21 @@ function open_item_popup(frm) {
                 fieldtype: 'Data'
             },
 
-
-
             {
                 label: 'UOM',
                 fieldname: 'uom',
                 fieldtype: 'Link',
                 options: 'UOM',
                 read_only: 0
+            },
+
+            {
+                label: 'Conversion Factor',
+                fieldname: 'conversion_factor',
+                fieldtype: 'Float',
+                read_only: 1,
+                default: 1,
+                hidden: 1
             }
 
         ],
@@ -173,6 +219,7 @@ function open_item_popup(frm) {
             child.schedule_date = values.schedule_date;
             child.qty = values.qty;
             child.uom = values.uom;
+            child.conversion_factor = values.conversion_factor || 1;
             child.custom_specification = values.custom_specification;
 
             frm.refresh_field('items');
@@ -190,11 +237,11 @@ function open_item_popup(frm) {
 // added field on supplier quotation for project and store
 
 frappe.ui.form.on('Material Request', {
-    refresh: function(frm) {
+    refresh: function (frm) {
 
         console.log("MR JS Loaded");
 
-        frm.page.inner_toolbar.find('button:contains("Supplier Quotation")').on('click', function() {
+        frm.page.inner_toolbar.find('button:contains("Supplier Quotation")').on('click', function () {
 
             console.log("SQ Button Clicked");
 
@@ -209,11 +256,11 @@ frappe.ui.form.on('Material Request', {
 
 frappe.ui.form.on('Material Request', {
 
-    refresh: function(frm) {
+    refresh: function (frm) {
 
         console.log("Category Filter Applied");
 
-        frm.set_query("item_code", "items", function(doc, cdt, cdn) {
+        frm.set_query("item_code", "items", function (doc, cdt, cdn) {
 
             if (frm.doc.custom_category) {
 
@@ -236,7 +283,7 @@ frappe.ui.form.on('Material Request', {
         });
     },
 
-    custom_category: function(frm) {
+    custom_category: function (frm) {
 
         console.log("Category Changed → Reset Items");
 
@@ -251,7 +298,7 @@ frappe.ui.form.on('Material Request', {
 
 
 frappe.ui.form.on('Material Request', {
-    refresh: function(frm) {
+    refresh: function (frm) {
 
         setTimeout(() => {
 
@@ -271,7 +318,7 @@ frappe.ui.form.on('Material Request', {
 // hide Request For Quoataion 
 
 frappe.ui.form.on('Material Request', {
-    refresh: function(frm) {
+    refresh: function (frm) {
 
         // Remove Request for Quotation from Create menu
         frm.page.remove_inner_button('Request for Quotation', 'Create');
