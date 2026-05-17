@@ -101,7 +101,8 @@ fixtures = [
 #     }
 # ]
 
-
-
-
-
+# Sanskruti Group branding assets
+app_include_css = ["/assets/procureflow/css/sanskruti_branding.css"]
+app_include_js = ["/assets/procureflow/js/sanskruti_branding.js"]
+web_include_css = ["/assets/procureflow/css/sanskruti_branding.css"]
+web_include_js = ["/assets/procureflow/js/sanskruti_branding.js"]

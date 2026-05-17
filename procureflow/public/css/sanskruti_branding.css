@@ -1,0 +1,345 @@
+:root {
+  --sga-green: #087d42;
+  --sga-green-dark: #056634;
+  --sga-blue: #144b91;
+  --sga-blue-dark: #0a3e83;
+  --sga-ink: #17324d;
+  --sga-muted: #6b7a90;
+  --sga-border: rgba(20, 75, 145, 0.16);
+  --sga-shadow: 0 18px 45px rgba(21, 45, 74, 0.14);
+}
+
+/* Desk branding and light SaaS polish */
+.desk-page .navbar,
+body[data-path^="desk"] .navbar {
+  border-bottom: 1px solid rgba(20, 75, 145, 0.08);
+  box-shadow: 0 8px 24px rgba(19, 50, 80, 0.05);
+}
+
+.sga-navbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--sga-blue) !important;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.sga-navbar-brand img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+
+.standard-sidebar .desk-sidebar-item.selected,
+.standard-sidebar .standard-sidebar-item.selected,
+.layout-side-section .sidebar-item.selected {
+  background: rgba(8, 125, 66, 0.10);
+  color: var(--sga-green-dark);
+  border-radius: 8px;
+}
+
+.widget,
+.desk-card,
+.page-card,
+.form-dashboard-section,
+.dashboard-widget-box {
+  border-radius: 12px;
+  border-color: rgba(20, 75, 145, 0.10);
+}
+
+.btn-primary,
+.btn.btn-primary,
+button.btn-primary {
+  border-color: transparent !important;
+  background: linear-gradient(90deg, var(--sga-green), var(--sga-blue)) !important;
+  box-shadow: 0 10px 22px rgba(20, 75, 145, 0.18);
+}
+
+.btn-primary:hover,
+.btn.btn-primary:hover,
+button.btn-primary:hover {
+  filter: brightness(1.02);
+  box-shadow: 0 13px 26px rgba(20, 75, 145, 0.22);
+}
+
+.page-title .title-text,
+.module-title,
+.workspace-title {
+  color: var(--sga-ink);
+}
+
+/* Login page */
+body.for-login,
+body[data-path="login"],
+body[data-route="login"] {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 12% 78%, rgba(8, 125, 66, 0.18) 0, rgba(8, 125, 66, 0.18) 76px, transparent 77px),
+    radial-gradient(circle at 100% 18%, rgba(20, 75, 145, 0.18) 0, rgba(20, 75, 145, 0.18) 95px, transparent 96px),
+    linear-gradient(135deg, #f4fbf4 0%, #ffffff 42%, #eef7ff 100%) !important;
+}
+
+body.for-login::before,
+body[data-path="login"]::before,
+body[data-route="login"]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(rgba(20, 75, 145, 0.12) 1px, transparent 1px),
+    linear-gradient(140deg, transparent 0 48%, rgba(8, 125, 66, 0.06) 48% 49%, transparent 49% 100%);
+  background-size: 12px 12px, 100% 100%;
+  mask-image: linear-gradient(90deg, rgba(0,0,0,0.25), rgba(0,0,0,0.08), rgba(0,0,0,0.22));
+}
+
+body.for-login::after,
+body[data-path="login"]::after,
+body[data-route="login"]::after {
+  content: "";
+  position: fixed;
+  left: -16%;
+  right: -16%;
+  bottom: -26%;
+  height: 45vh;
+  pointer-events: none;
+  border-radius: 50% 50% 0 0;
+  background: repeating-radial-gradient(ellipse at center, rgba(20, 75, 145, 0.07) 0 1px, transparent 2px 7px);
+  opacity: 0.48;
+}
+
+.login-content {
+  width: 100% !important;
+  min-height: 100vh !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 24px !important;
+  position: relative;
+  z-index: 1;
+}
+
+.for-login {
+  width: min(100%, 500px) !important;
+  margin: 0 auto !important;
+  padding: 0 !important;
+}
+
+.login-content .page-card-head,
+.login-content h4,
+.for-login > .page-card-head,
+.for-login > h4,
+.for-login > .app-logo,
+.for-login > img.app-logo {
+  display: none !important;
+}
+
+.for-login .page-card,
+.login-content .page-card {
+  width: min(100%, 500px) !important;
+  max-width: 500px !important;
+  min-height: auto !important;
+  margin: 0 auto !important;
+  padding: 30px 42px 28px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  border: 1px solid rgba(255, 255, 255, 0.74) !important;
+  border-radius: 24px !important;
+  background: rgba(255, 255, 255, 0.88) !important;
+  box-shadow: 0 18px 42px rgba(21, 45, 74, 0.14) !important;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.sga-login-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin: 0 0 18px;
+}
+
+.sga-login-brand img {
+  width: 250px;
+  max-width: 84%;
+  height: auto;
+  object-fit: contain;
+  margin: 0 0 8px;
+}
+
+.sga-login-brand-title {
+  margin: 0;
+  color: var(--sga-blue);
+  font-size: 25px;
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: 0;
+}
+
+.sga-login-brand-subtitle {
+  margin: 8px 0 0;
+  color: var(--sga-green);
+  font-size: 14px;
+  font-weight: 750;
+  letter-spacing: 0;
+}
+
+.for-login .page-card form,
+.login-content .page-card form {
+  width: 100% !important;
+  margin: 0 !important;
+}
+
+.for-login .page-card .form-group,
+.login-content .page-card .form-group {
+  margin-bottom: 12px !important;
+}
+
+.for-login .page-card label,
+.login-content .page-card label {
+  display: none !important;
+}
+
+.for-login .page-card .form-control,
+.login-content .page-card .form-control,
+.for-login input[type="text"],
+.for-login input[type="email"],
+.for-login input[type="password"] {
+  height: 42px !important;
+  border-radius: 10px !important;
+  border: 1px solid rgba(20, 75, 145, 0.18) !important;
+  background: rgba(255, 255, 255, 0.82) !important;
+  box-shadow: inset 0 1px 2px rgba(20, 75, 145, 0.03) !important;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+
+.for-login .page-card .form-control:focus,
+.login-content .page-card .form-control:focus,
+.for-login input:focus {
+  border-color: rgba(8, 125, 66, 0.46) !important;
+  background: #fff !important;
+  box-shadow: 0 0 0 4px rgba(8, 125, 66, 0.10) !important;
+}
+
+.for-login .forgot-password-message,
+.login-content .forgot-password-message {
+  margin: 4px 0 14px !important;
+  text-align: right !important;
+  font-size: 12px !important;
+}
+
+.for-login .btn-login,
+.for-login .btn-primary,
+.login-content .btn-login,
+.login-content .btn-primary {
+  width: 100% !important;
+  min-height: 42px !important;
+  border-radius: 10px !important;
+  font-weight: 750 !important;
+}
+
+.for-login .login-divider,
+.login-content .login-divider {
+  margin: 14px 0 12px !important;
+  color: var(--sga-muted) !important;
+}
+
+.for-login .btn-login-option,
+.login-content .btn-login-option,
+.for-login .btn-default,
+.login-content .btn-default {
+  min-height: 42px !important;
+  border-radius: 10px !important;
+  border-color: rgba(20, 75, 145, 0.14) !important;
+  background: rgba(255, 255, 255, 0.74) !important;
+}
+
+/* Branded splash screen */
+.sga-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #f4fbf4 0%, #ffffff 45%, #edf7ff 100%);
+  transition: opacity 0.28s ease, visibility 0.28s ease;
+}
+
+.sga-splash.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.sga-splash-card {
+  width: min(88vw, 390px);
+  padding: 34px 32px;
+  text-align: center;
+  border: 1px solid rgba(255, 255, 255, 0.74);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: var(--sga-shadow);
+  backdrop-filter: blur(18px);
+}
+
+.sga-splash-card img {
+  width: 210px;
+  max-width: 86%;
+  height: auto;
+  margin-bottom: 14px;
+}
+
+.sga-splash-title {
+  color: var(--sga-blue);
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.sga-spinner {
+  width: 34px;
+  height: 34px;
+  margin: 20px auto 0;
+  border: 3px solid rgba(20, 75, 145, 0.16);
+  border-top-color: var(--sga-green);
+  border-radius: 50%;
+  animation: sga-spin 0.9s linear infinite;
+}
+
+@keyframes sga-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 576px) {
+  .login-content {
+    padding: 18px !important;
+  }
+
+  .for-login,
+  .for-login .page-card,
+  .login-content .page-card {
+    width: 100% !important;
+    max-width: 430px !important;
+  }
+
+  .for-login .page-card,
+  .login-content .page-card {
+    padding: 26px 22px 24px !important;
+    border-radius: 20px !important;
+  }
+
+  .sga-login-brand img {
+    width: 218px;
+  }
+
+  .sga-login-brand-title {
+    font-size: 22px;
+  }
+}
