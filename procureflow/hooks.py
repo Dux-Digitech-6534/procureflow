@@ -10,11 +10,10 @@ app_license = "mit"
 doctype_js = {
     "Material Request": "public/js/material_request.js",
     "Supplier Quotation": "public/js/supplier_quotation.js"  ,
-      "Purchase Order": "public/js/purchase_order.js"   # 🔥 THIS MISSING
+      "Purchase Order": "public/js/purchase_order.js"  ,
+      "Purchase Receipt": "public/js/purchase_receipt.js"  
+       # 🔥 THIS MISSING
 }
-
-
-
 
 
 fixtures = [

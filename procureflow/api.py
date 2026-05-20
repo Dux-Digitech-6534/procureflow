@@ -32,3 +32,9 @@ def make_supplier_quotation(source_name, target_doc=None):
     )
 
     return doc
+
+
+
+
+
+    # mail approval setting 

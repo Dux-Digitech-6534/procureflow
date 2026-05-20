@@ -324,3 +324,43 @@ frappe.ui.form.on('Material Request', {
         frm.page.remove_inner_button('Request for Quotation', 'Create');
     }
 });
+
+
+
+
+
+
+// hide get item form button 
+
+frappe.ui.form.on("Material Request", {
+    onload: function (frm) {
+        hide_material_request_buttons(frm);
+    },
+
+    refresh: function (frm) {
+        hide_material_request_buttons(frm);
+    }
+});
+
+function hide_material_request_buttons(frm) {
+    setTimeout(() => {
+        // Top "Get Items From" button hide
+        frm.page.remove_inner_button("Get Items From");
+
+        // Extra fallback: hide "Get Items From" by text
+        $('.btn:contains("Get Items From")').hide();
+
+        // Child table Download / Upload buttons hide
+        $('[data-fieldname="items"] .grid-download').hide();
+        $('[data-fieldname="items"] .grid-upload').hide();
+
+        // Fallback by button text inside items table
+        $('[data-fieldname="items"] button:contains("Download")').hide();
+        $('[data-fieldname="items"] button:contains("Upload")').hide();
+
+        // Extra fallback for visible Download / Upload buttons
+        $('button:contains("Download")').hide();
+        $('button:contains("Upload")').hide();
+
+    }, 500);
+}
