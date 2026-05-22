@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var BRAND = "Sanskruti Group";
+  var BRAND = "Sanskruti Developer";
   var SUBTITLE = "Smart ERP Solutions";
   var LOGO = "/assets/procureflow/img/sanskruti-group-asia-logo.png";
   var FAVICON = "/assets/procureflow/img/sanskruti-group-asia-favicon.png";

@@ -42,3 +42,32 @@ $(document).on("click", 'button:contains("Get Items From")', function () {
         $('.dropdown-item:contains("Purchase Invoice")').hide();
     }, 100);
 });
+
+
+
+// add date and time to hidden field 
+
+
+frappe.ui.form.on('Purchase Receipt', {
+    custom_add_material: function (frm) {
+        if (frm.doc.custom_add_material) {
+            frm.set_value(
+                'custom_material_receipt_datetime',
+                frappe.datetime.now_datetime()
+            );
+        } else {
+            frm.set_value('custom_material_receipt_datetime', '');
+        }
+    },
+
+    custom_add_invoice: function (frm) {
+        if (frm.doc.custom_add_invoice) {
+            frm.set_value(
+                'custom_material_invoice_datetime',
+                frappe.datetime.now_datetime()
+            );
+        } else {
+            frm.set_value('custom_material_invoice_datetime', '');
+        }
+    }
+});

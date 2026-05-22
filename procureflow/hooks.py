@@ -16,6 +16,13 @@ doctype_js = {
 }
 
 
+doc_events = {
+    "Purchase Order": {
+        "before_save": "procureflow.api.copy_receipt_from_material_request"
+    }
+}
+
+
 fixtures = [
 
     # ✅ Custom Fields (ONLY required ones)
@@ -28,6 +35,7 @@ fixtures = [
                 "Material Request-custom_select_project_",
                 "Material Request-custom_remark",
                 "Material Request-custom_category",
+                "Material Request-custom_add_receipt",
 
                 # Supplier Quotation
                 "Supplier Quotation-custom_project_name",
@@ -38,10 +46,14 @@ fixtures = [
                 "Purchase Order-custom_project_name",
                 "Purchase Order-custom_remark",
                 "Purchase Order-custom_category",
+                "Purchase Order-custom_test_company_",
+                "Purchase Order-custom_add_receipt",
 
                 # Purchase Receipt
                 "Purchase Receipt-custom_add_material",
-                "Purchase Receipt-custom_add_invoice"
+                "Purchase Receipt-custom_add_invoice",
+                 "Purchase Receipt-custom_material_invoice_datetime",
+                  "Purchase Receipt-custom_material_receipt_datetime"
 
             ]]
         ]

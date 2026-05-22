@@ -1,42 +1,28 @@
 {
  "actions": [],
  "allow_rename": 1,
- "autoname": "field:project_name",
- "creation": "2026-04-12 17:44:16.540318",
+ "autoname": "field:company_name",
+ "creation": "2026-05-20 14:27:38.452408",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "company_name",
-  "project_name",
-  "store_name"
+  "company_name"
  ],
  "fields": [
   {
-   "fieldname": "project_name",
-   "fieldtype": "Data",
-   "label": "Project Name",
-   "unique": 1
-  },
-  {
-   "fieldname": "store_name",
-   "fieldtype": "Link",
-   "label": "Store Name",
-   "options": "Warehouse"
-  },
-  {
    "fieldname": "company_name",
-   "fieldtype": "Link",
+   "fieldtype": "Data",
    "label": "Company Name",
-   "options": "Company Master"
+   "unique": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-05-20 14:31:04.775246",
+ "modified": "2026-05-20 14:28:49.675780",
  "modified_by": "Administrator",
  "module": "Procure Flow",
- "name": "Project Master",
+ "name": "Company Master",
  "naming_rule": "By fieldname",
  "owner": "Administrator",
  "permissions": [
