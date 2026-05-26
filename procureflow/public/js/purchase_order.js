@@ -194,6 +194,8 @@ async function set_mr_data(frm) {
             await frm.set_value("custom_category", mr.custom_category);
         }
 
+        await set_priority_from_material_requests(frm);
+
         // Direct MR warehouse fallback
         let mr_warehouse =
             mr.set_warehouse ||
@@ -215,6 +217,70 @@ async function set_mr_data(frm) {
     } catch (e) {
         console.error("Error while fetching Material Request:", e);
     }
+}
+
+async function set_priority_from_material_requests(frm) {
+    let mr_names = await get_linked_material_requests_from_po(frm);
+
+    if (!mr_names.length) {
+        if (!frm.doc.custom_priority) {
+            await frm.set_value("custom_priority", "Medium");
+        }
+        return;
+    }
+
+    let priorities = [];
+
+    for (let mr_name of mr_names) {
+        try {
+            let r = await frappe.db.get_value("Material Request", mr_name, "custom_priority");
+            if (r.message && r.message.custom_priority) {
+                priorities.push(r.message.custom_priority);
+            }
+        } catch (e) {
+            console.warn("Could not fetch Material Request priority:", mr_name, e);
+        }
+    }
+
+    await frm.set_value("custom_priority", get_highest_priority(priorities));
+}
+
+async function get_linked_material_requests_from_po(frm) {
+    let material_requests = [];
+    let items = frm.doc.items || [];
+
+    for (let row of items) {
+        if (row.material_request && !material_requests.includes(row.material_request)) {
+            material_requests.push(row.material_request);
+        }
+
+        if (!row.material_request && row.material_request_item) {
+            let mr_name = await get_parent_mr_from_mr_item(row.material_request_item);
+            if (mr_name && !material_requests.includes(mr_name)) {
+                material_requests.push(mr_name);
+            }
+        }
+    }
+
+    return material_requests;
+}
+
+function get_highest_priority(priorities) {
+    let priority_order = {
+        "Low": 1,
+        "Medium": 2,
+        "High": 3
+    };
+
+    if (!priorities.length) {
+        return "Medium";
+    }
+
+    return priorities.reduce(function (highest, priority) {
+        return (priority_order[priority] || 2) > (priority_order[highest] || 2)
+            ? priority
+            : highest;
+    }, "Medium");
 }
 
 // =====================================================

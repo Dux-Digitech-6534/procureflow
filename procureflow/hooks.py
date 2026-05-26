@@ -19,6 +19,9 @@ doctype_js = {
 doc_events = {
     "Purchase Order": {
         "before_save": "procureflow.api.copy_receipt_from_material_request"
+    },
+    "Purchase Receipt": {
+        "before_save": "procureflow.api.populate_purchase_receipt_project_company_from_purchase_order"
     }
 }
 
@@ -36,6 +39,7 @@ fixtures = [
                 "Material Request-custom_remark",
                 "Material Request-custom_category",
                 "Material Request-custom_add_receipt",
+                "Material Request-custom_priority",
 
                 # Supplier Quotation
                 "Supplier Quotation-custom_project_name",
@@ -48,12 +52,19 @@ fixtures = [
                 "Purchase Order-custom_category",
                 "Purchase Order-custom_test_company_",
                 "Purchase Order-custom_add_receipt",
+                "Purchase Order-custom_priority",
+                "Purchase Order-custom_authorized_signature",
 
                 # Purchase Receipt
                 "Purchase Receipt-custom_add_material",
                 "Purchase Receipt-custom_add_invoice",
                  "Purchase Receipt-custom_material_invoice_datetime",
-                  "Purchase Receipt-custom_material_receipt_datetime"
+                  "Purchase Receipt-custom_material_receipt_datetime",
+                "Purchase Receipt-custom_project_name",
+                "Purchase Receipt-custom_test_company_",
+                "Purchase Receipt-custom_payment_status",
+                "Purchase Receipt-custom_total_paid_amount",
+                "Purchase Receipt-custom_outstanding_amount"
 
             ]]
         ]
@@ -63,7 +74,36 @@ fixtures = [
     {
         "dt": "Workflow",
         "filters": [
-            ["name", "=", "Workflow For PO On Procureflow"]
+            ["name", "in", [
+                "Workflow For PO On Procureflow",
+                "Procureflow Material Request Approval"
+            ]]
+        ]
+    },
+    {
+        "dt": "Workflow State",
+        "filters": [
+            ["name", "in", [
+                "Pending Approval",
+                "Approved",
+                "Rejected"
+            ]]
+        ]
+    },
+    {
+        "dt": "Workflow Action Master",
+        "filters": [
+            ["name", "in", [
+                "Approve",
+                "Reject",
+                "Reopen"
+            ]]
+        ]
+    },
+    {
+        "dt": "Print Format",
+        "filters": [
+            ["name", "=", "Sanskruti PO Print Format"]
         ]
     }
 ]
