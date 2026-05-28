@@ -879,3 +879,125 @@ frappe.ui.form.on('Purchase Order', {
         }
     }
 });
+
+
+frappe.ui.form.on("Purchase Order", {
+    refresh: function (frm) {
+        setup_purchase_order_rejection_reason(frm);
+    }
+});
+
+function setup_purchase_order_rejection_reason(frm) {
+    if (window.__procureflow_purchase_order_reject_guard) {
+        return;
+    }
+
+    window.__procureflow_purchase_order_reject_guard = true;
+
+    document.addEventListener("click", function (event) {
+        let target = event.target.closest("a, button");
+
+        if (!target || !cur_frm || cur_frm.doctype !== "Purchase Order") {
+            return;
+        }
+
+        if ($(target).closest(".modal, .modal-dialog, .frappe-dialog").length) {
+            return;
+        }
+
+        if ($(target).text().trim() !== "Reject") {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        show_rejection_reason_dialog(cur_frm, "custom_rejection_remark");
+    }, true);
+}
+
+function show_rejection_reason_dialog(frm, fieldname) {
+    if (frm.__procureflow_rejection_dialog_open) {
+        return;
+    }
+
+    frm.__procureflow_rejection_dialog_open = true;
+
+    let dialog = new frappe.ui.Dialog({
+        title: __("Rejection Reason"),
+        fields: [
+            {
+                fieldname: "reason",
+                fieldtype: "Small Text",
+                label: __("Reason / Remark"),
+                reqd: 1
+            }
+        ],
+        primary_action_label: __("Reject"),
+        primary_action: function (values) {
+            console.log("Reject popup primary action clicked", values);
+
+            let reason = (values.reason || "").trim();
+
+            if (!reason) {
+                frappe.msgprint(__("Please enter rejection reason."));
+                return;
+            }
+
+            if (!frm.fields_dict[fieldname]) {
+                frappe.msgprint({
+                    title: __("Reject Failed"),
+                    message: __("Rejection Remark field is not available. Please run migrate and clear-cache, then try again."),
+                    indicator: "red"
+                });
+                return;
+            }
+
+            console.log("Purchase Order before reject", {
+                workflow_state: frm.doc.workflow_state,
+                docstatus: frm.doc.docstatus
+            });
+
+            dialog.get_primary_btn().prop("disabled", true);
+
+            frappe.call({
+                method: "procureflow.api.reject_with_remark",
+                args: {
+                    doctype: frm.doc.doctype,
+                    name: frm.doc.name,
+                    remark: reason
+                },
+                freeze: true,
+                freeze_message: __("Rejecting...")
+            })
+                .then(function (r) {
+                    console.log("Purchase Order reject response", r);
+
+                    frappe.show_alert({
+                        message: __("Purchase Order rejected successfully."),
+                        indicator: "green"
+                    });
+
+                    dialog.hide();
+
+                    return frm.reload_doc();
+                })
+                .catch(function (err) {
+                    console.error("Purchase Order reject failed", err);
+                    dialog.get_primary_btn().prop("disabled", false);
+
+                    frappe.msgprint({
+                        title: __("Reject Failed"),
+                        message: (err && err.message) || __("Unable to reject Purchase Order."),
+                        indicator: "red"
+                    });
+                });
+        }
+    });
+
+    dialog.onhide = function () {
+        frm.__procureflow_rejection_dialog_open = false;
+    };
+
+    dialog.show();
+}

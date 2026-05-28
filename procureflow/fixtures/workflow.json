@@ -56,6 +56,22 @@
     "update_field": null,
     "update_value": null,
     "workflow_builder_id": "3"
+   },
+   {
+    "allow_edit": "All",
+    "avoid_status_override": 0,
+    "doc_status": "0",
+    "is_optional_state": 0,
+    "message": null,
+    "next_action_email_template": null,
+    "parent": "Workflow For PO On Procureflow",
+    "parentfield": "states",
+    "parenttype": "Workflow",
+    "send_email": 1,
+    "state": "Rejected",
+    "update_field": null,
+    "update_value": null,
+    "workflow_builder_id": "4"
    }
   ],
   "transitions": [
@@ -103,7 +119,7 @@
     "allow_self_approval": 1,
     "allowed": "All",
     "condition": "doc.grand_total > 50000",
-    "next_state": "Draft",
+    "next_state": "Rejected",
     "parent": "Workflow For PO On Procureflow",
     "parentfield": "transitions",
     "parenttype": "Workflow",

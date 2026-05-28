@@ -120,21 +120,45 @@ def get_purchase_receipt_total(purchase_receipt):
 
 
 def get_submitted_paid_amount(purchase_receipt, exclude_name=None):
-    filters = {
-        "purchase_receipt": purchase_receipt,
-        "docstatus": 1,
-    }
+    conditions = [
+        "purchase_receipt = %s",
+        "docstatus = 1",
+    ]
+    values = [purchase_receipt]
 
-    if exclude_name:
-        filters["name"] = ["!=", exclude_name]
+    if exclude_name and not str(exclude_name).startswith("new-"):
+        conditions.append("name != %s")
+        values.append(exclude_name)
 
-    return flt(
-        frappe.db.get_value(
-            "Procureflow Payment Entry",
-            filters,
-            "sum(amount)",
-        )
-    )
+    total_paid = frappe.db.sql(
+        """
+        select coalesce(sum(amount), 0)
+        from `tabProcureflow Payment Entry`
+        where {conditions}
+        """.format(conditions=" and ".join(conditions)),
+        tuple(values),
+    )[0][0]
+
+    return flt(total_paid)
+
+
+
+# def get_submitted_paid_amount(purchase_receipt, exclude_name=None):
+#     filters = {
+#         "purchase_receipt": purchase_receipt,
+#         "docstatus": 1,
+#     }
+
+#     if exclude_name:
+#         filters["name"] = ["!=", exclude_name]
+
+#     return flt(
+#         frappe.db.get_value(
+#             "Procureflow Payment Entry",
+#             filters,
+#             "sum(amount)",
+#         )
+#     )
 
 
 def update_purchase_receipt_payment_status(purchase_receipt):

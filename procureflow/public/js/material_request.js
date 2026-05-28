@@ -364,3 +364,139 @@ function hide_material_request_buttons(frm) {
 
     }, 500);
 }
+
+
+frappe.ui.form.on("Material Request", {
+    refresh: function (frm) {
+        setup_material_request_rejection_reason(frm);
+    }
+});
+
+function setup_material_request_rejection_reason(frm) {
+    if (window.__procureflow_material_request_reject_guard) {
+        return;
+    }
+
+    window.__procureflow_material_request_reject_guard = true;
+
+    document.addEventListener("click", function (event) {
+        let target = event.target.closest("a, button");
+
+        if (!target || !cur_frm || cur_frm.doctype !== "Material Request") {
+            return;
+        }
+
+        if ($(target).closest(".modal, .modal-dialog, .frappe-dialog").length) {
+            return;
+        }
+
+        if ($(target).text().trim() !== "Reject") {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        show_rejection_reason_dialog(cur_frm, "custom_rejection_remark");
+    }, true);
+}
+
+function show_rejection_reason_dialog(frm, fieldname) {
+    if (frm.__procureflow_rejection_dialog_open) {
+        return;
+    }
+
+    frm.__procureflow_rejection_dialog_open = true;
+
+    let dialog = new frappe.ui.Dialog({
+        title: __("Rejection Reason"),
+        fields: [
+            {
+                fieldname: "reason",
+                fieldtype: "Small Text",
+                label: __("Reason / Remark"),
+                reqd: 1
+            }
+        ],
+        primary_action_label: __("Reject"),
+        primary_action: function (values) {
+            console.log("Reject popup primary action clicked", values);
+
+            let reason = (values.reason || "").trim();
+
+            if (!reason) {
+                frappe.msgprint(__("Please enter rejection reason."));
+                return;
+            }
+
+            if (!frm.fields_dict[fieldname]) {
+                frappe.msgprint({
+                    title: __("Reject Failed"),
+                    message: __("Rejection Remark field is not available. Please run migrate and clear-cache, then try again."),
+                    indicator: "red"
+                });
+                return;
+            }
+
+            dialog.get_primary_btn().prop("disabled", true);
+
+            frm.set_value(fieldname, reason)
+                .then(function () {
+                    return frm.save();
+                })
+                .then(function () {
+                    console.log("Rejection remark saved. Applying workflow Reject.");
+                    frm.selected_workflow_action = "Reject";
+
+                    return frm.script_manager.trigger("before_workflow_action");
+                })
+                .then(function () {
+                    return frappe.call({
+                        method: "frappe.model.workflow.apply_workflow",
+                        args: {
+                            doc: frm.doc,
+                            action: "Reject"
+                        },
+                        freeze: true,
+                        freeze_message: __("Rejecting...")
+                    });
+                })
+                .then(function (r) {
+                    console.log("Workflow Reject response", r);
+
+                    if (r.message) {
+                        frappe.model.sync(r.message);
+                    }
+
+                    frm.selected_workflow_action = null;
+                    frm.script_manager.trigger("after_workflow_action");
+
+                    frappe.show_alert({
+                        message: __("Document rejected successfully."),
+                        indicator: "green"
+                    });
+
+                    dialog.hide();
+
+                    return frm.reload_doc();
+                })
+                .catch(function (err) {
+                    console.error("Reject failed", err);
+                    frm.selected_workflow_action = null;
+                    dialog.get_primary_btn().prop("disabled", false);
+
+                    frappe.msgprint({
+                        title: __("Reject Failed"),
+                        message: (err && err.message) || __("Unable to reject document. Please check console/server logs."),
+                        indicator: "red"
+                    });
+                });
+        }
+    });
+
+    dialog.onhide = function () {
+        frm.__procureflow_rejection_dialog_open = false;
+    };
+
+    dialog.show();
+}

@@ -40,6 +40,7 @@ fixtures = [
                 "Material Request-custom_category",
                 "Material Request-custom_add_receipt",
                 "Material Request-custom_priority",
+                "Material Request-custom_rejection_remark",
 
                 # Supplier Quotation
                 "Supplier Quotation-custom_project_name",
@@ -54,6 +55,7 @@ fixtures = [
                 "Purchase Order-custom_add_receipt",
                 "Purchase Order-custom_priority",
                 "Purchase Order-custom_authorized_signature",
+                "Purchase Order-custom_rejection_remark",
 
                 # Purchase Receipt
                 "Purchase Receipt-custom_add_material",

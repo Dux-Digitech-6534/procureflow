@@ -1,5 +1,6 @@
 import frappe
 from frappe.model.mapper import get_mapped_doc
+from frappe.model.workflow import apply_workflow, get_workflow
 from frappe.utils import flt, nowdate
 
 @frappe.whitelist()
@@ -208,18 +209,89 @@ def get_purchase_receipt_total(purchase_receipt):
 
 
 def get_procureflow_paid_amount(purchase_receipt, exclude_name=None):
-    filters = {
-        "purchase_receipt": purchase_receipt,
-        "docstatus": 1,
-    }
+    conditions = [
+        "purchase_receipt = %s",
+        "docstatus = 1",
+    ]
+    values = [purchase_receipt]
 
     if exclude_name and not str(exclude_name).startswith("new-"):
-        filters["name"] = ["!=", exclude_name]
+        conditions.append("name != %s")
+        values.append(exclude_name)
 
-    return flt(
-        frappe.db.get_value(
-            "Procureflow Payment Entry",
-            filters,
-            "sum(amount)",
+    total_paid = frappe.db.sql(
+        """
+        select coalesce(sum(amount), 0)
+        from `tabProcureflow Payment Entry`
+        where {conditions}
+        """.format(conditions=" and ".join(conditions)),
+        tuple(values),
+    )[0][0]
+
+    return flt(total_paid)
+
+
+
+
+
+# def get_procureflow_paid_amount(purchase_receipt, exclude_name=None):
+#     filters = {
+#         "purchase_receipt": purchase_receipt,
+#         "docstatus": 1,
+#     }
+
+#     if exclude_name and not str(exclude_name).startswith("new-"):
+#         filters["name"] = ["!=", exclude_name]
+
+#     return flt(
+#         frappe.db.get_value(
+#             "Procureflow Payment Entry",
+#             filters,
+#             "sum(amount)",
+#         )
+#     )
+
+
+@frappe.whitelist()
+def reject_with_remark(doctype, name, remark):
+    if doctype not in ("Purchase Order", "Material Request"):
+        frappe.throw("Reject with remark is not allowed for this document type.")
+
+    remark = (remark or "").strip()
+    if not remark:
+        frappe.throw("Rejection remark is required.")
+
+    doc = frappe.get_doc(doctype, name)
+
+    if doctype == "Purchase Order":
+        workflow = get_workflow(doc.doctype)
+        current_state = doc.get(workflow.workflow_state_field)
+        reject_transition = next(
+            (
+                transition
+                for transition in workflow.transitions
+                if transition.state == current_state and transition.action == "Reject"
+            ),
+            None,
         )
-    )
+
+        if reject_transition and reject_transition.next_state != "Rejected":
+            frappe.throw(
+                "Purchase Order Reject workflow is configured to move to {0}. "
+                "Please migrate the updated workflow fixture so Reject moves to Rejected.".format(
+                    reject_transition.next_state
+                )
+            )
+
+    doc.custom_rejection_remark = remark
+    doc.save(ignore_permissions=True)
+
+    doc = apply_workflow(doc, "Reject")
+
+    return {
+        "doctype": doc.doctype,
+        "name": doc.name,
+        "workflow_state": doc.get("workflow_state"),
+        "docstatus": doc.docstatus,
+        "custom_rejection_remark": doc.get("custom_rejection_remark"),
+    }
