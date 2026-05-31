@@ -1,0 +1,17 @@
+{
+ "content": null,
+ "docstatus": 0,
+ "doctype": "Page",
+ "idx": 0,
+ "modified_by": "Administrator",
+ "module": "Procure Flow",
+ "name": "procurement-dashboard",
+ "owner": "Administrator",
+ "page_name": "procurement-dashboard",
+ "roles": [],
+ "script": null,
+ "standard": "Yes",
+ "style": null,
+ "system_page": 0,
+ "title": "Procurement Dashboard"
+}

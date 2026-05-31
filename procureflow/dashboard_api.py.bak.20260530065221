@@ -1,0 +1,526 @@
+import calendar
+from collections import defaultdict
+
+import frappe
+from frappe.utils import add_days, flt, get_first_day, get_last_day, getdate, nowdate
+
+
+DATE_FIELDS = {
+    "Material Request": "transaction_date",
+    "Supplier Quotation": "transaction_date",
+    "Purchase Order": "transaction_date",
+    "Purchase Receipt": "posting_date",
+    "Procureflow Payment Entry": "payment_date",
+}
+
+PROJECT_FIELDS = {
+    "Material Request": ("custom_project_name", "custom_select_project_", "project"),
+    "Supplier Quotation": ("custom_project_name", "project"),
+    "Purchase Order": ("custom_project_name", "project"),
+    "Purchase Receipt": ("custom_project_name", "project"),
+}
+
+COMPANY_FIELDS = {
+    "Material Request": ("company",),
+    "Supplier Quotation": ("company",),
+    "Purchase Order": ("company", "custom_test_company_"),
+    "Purchase Receipt": ("company", "custom_test_company_"),
+}
+
+
+@frappe.whitelist()
+def get_procurement_dashboard_data(company=None, project=None, month=None, from_date=None, to_date=None):
+    filters = get_dashboard_filters(company=company, project=project, month=month, from_date=from_date, to_date=to_date)
+
+    return {
+        "filters": filters,
+        "filter_options": get_filter_options(),
+        "kpis": get_kpis(filters),
+        "overview": get_overview(filters),
+        "operations": get_operations(filters),
+        "payment_tracking": get_payment_tracking(filters),
+        "analytics": get_analytics(filters),
+    }
+
+
+def get_dashboard_filters(company=None, project=None, month=None, from_date=None, to_date=None):
+    if month:
+        month_start = getdate(f"{month}-01")
+        from_date = from_date or month_start
+        to_date = to_date or get_last_day(month_start)
+
+    if not from_date or not to_date:
+        current = getdate(nowdate())
+        from_date = from_date or get_first_day(current)
+        to_date = to_date or get_last_day(current)
+
+    return {
+        "company": company or "",
+        "project": project or "",
+        "month": month or str(getdate(from_date))[:7],
+        "from_date": str(getdate(from_date)),
+        "to_date": str(getdate(to_date)),
+    }
+
+
+def doctype_exists(doctype):
+    try:
+        return bool(frappe.db.exists("DocType", doctype))
+    except Exception:
+        return False
+
+
+def has_field(doctype, fieldname):
+    try:
+        return bool(frappe.get_meta(doctype).has_field(fieldname) or fieldname in ("name", "docstatus", "owner", "creation", "modified"))
+    except Exception:
+        return False
+
+
+def first_existing_field(doctype, candidates):
+    for fieldname in candidates:
+        if has_field(doctype, fieldname):
+            return fieldname
+    return None
+
+
+def get_amount_field(doctype):
+    return first_existing_field(doctype, ("base_grand_total", "grand_total", "rounded_total", "total", "amount"))
+
+
+def get_purchase_receipt_total(row):
+    return flt(row.get("rounded_total")) or flt(row.get("grand_total")) or flt(row.get("base_grand_total"))
+
+
+def build_filters(doctype, dashboard_filters, date_field=None, include_date=True):
+    filters = {}
+    date_field = date_field or DATE_FIELDS.get(doctype)
+
+    if include_date and date_field and has_field(doctype, date_field):
+        filters[date_field] = ["between", [dashboard_filters["from_date"], dashboard_filters["to_date"]]]
+
+    company = dashboard_filters.get("company")
+    if company:
+        company_field = first_existing_field(doctype, COMPANY_FIELDS.get(doctype, ("company",)))
+        if company_field:
+            filters[company_field] = company
+
+    project = dashboard_filters.get("project")
+    if project:
+        project_field = first_existing_field(doctype, PROJECT_FIELDS.get(doctype, ("project",)))
+        if project_field:
+            filters[project_field] = project
+
+    return filters
+
+
+def get_list_safe(doctype, **kwargs):
+    if not doctype_exists(doctype):
+        return []
+    try:
+        return frappe.get_list(doctype, **kwargs)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), f"ProcureFlow dashboard query failed: {doctype}")
+        return []
+
+
+def get_all_safe(doctype, **kwargs):
+    if not doctype_exists(doctype):
+        return []
+    try:
+        return frappe.get_all(doctype, **kwargs)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), f"ProcureFlow dashboard aggregate failed: {doctype}")
+        return []
+
+
+def get_count(doctype, filters):
+    if not doctype_exists(doctype):
+        return 0
+    try:
+        return frappe.db.count(doctype, filters=filters)
+    except Exception:
+        return len(get_list_safe(doctype, filters=filters, fields=["name"], limit_page_length=10000))
+
+
+def normalize_status(row):
+    status = row.get("workflow_state") or row.get("status")
+    if status:
+        return str(status)
+    docstatus = row.get("docstatus")
+    if docstatus == 1:
+        return "Submitted"
+    if docstatus == 2:
+        return "Cancelled"
+    return "Draft"
+
+
+def status_bucket(status):
+    value = (status or "").strip().lower()
+    if "reject" in value or "cancel" in value:
+        return "rejected"
+    if value in ("approved", "submitted", "completed", "closed", "to bill", "to receive and bill", "to receive"):
+        return "approved"
+    if "complete" in value or "approved" in value:
+        return "approved"
+    if "pending" in value or "draft" in value or "open" in value or "approval" in value:
+        return "pending"
+    return "pending"
+
+
+def get_status_counts(doctype, dashboard_filters):
+    base_filters = build_filters(doctype, dashboard_filters)
+    fields = ["name", "docstatus"]
+    for candidate in ("status", "workflow_state"):
+        if has_field(doctype, candidate):
+            fields.append(candidate)
+
+    rows = get_list_safe(doctype, filters=base_filters, fields=fields, limit_page_length=10000)
+    counts = {"total": get_count(doctype, base_filters), "approved": 0, "pending": 0, "rejected": 0}
+
+    for row in rows:
+        bucket = status_bucket(normalize_status(row))
+        if bucket == "approved":
+            counts["approved"] += 1
+        elif bucket == "rejected":
+            counts["rejected"] += 1
+        else:
+            counts["pending"] += 1
+
+    if counts["total"] and counts["total"] > len(rows):
+        counts["pending"] += counts["total"] - len(rows)
+
+    return counts
+
+
+def get_sum(doctype, fieldname, filters):
+    if not fieldname or not doctype_exists(doctype):
+        return 0
+    try:
+        rows = frappe.get_list(doctype, filters=filters, fields=[f"sum({fieldname}) as value"], limit_page_length=1)
+        return flt(rows[0].get("value")) if rows else 0
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), f"ProcureFlow dashboard sum failed: {doctype}.{fieldname}")
+        return 0
+
+
+def get_kpis(filters):
+    mr_counts = get_status_counts("Material Request", filters)
+    po_counts = get_status_counts("Purchase Order", filters)
+    pr_counts = get_purchase_receipt_counts(filters)
+    po_amount_field = get_amount_field("Purchase Order")
+    po_filters = build_filters("Purchase Order", filters)
+    total_po_value = get_sum("Purchase Order", po_amount_field, po_filters)
+
+    month_start = get_first_day(getdate(filters["to_date"]))
+    month_end = get_last_day(month_start)
+    month_filters = dict(po_filters)
+    date_field = DATE_FIELDS["Purchase Order"]
+    if has_field("Purchase Order", date_field):
+        month_filters[date_field] = ["between", [str(month_start), str(month_end)]]
+
+    payment_summary = get_payment_summary(filters)
+
+    return {
+        "material_requests": mr_counts,
+        "purchase_orders": po_counts,
+        "purchase_receipts": pr_counts,
+        "total_po_value": {
+            "total": total_po_value,
+            "current_month": get_sum("Purchase Order", po_amount_field, month_filters),
+        },
+        "outstanding_amount": payment_summary,
+    }
+
+
+def get_purchase_receipt_counts(filters):
+    base_filters = build_filters("Purchase Receipt", filters)
+    fields = ["name", "docstatus"]
+    if has_field("Purchase Receipt", "status"):
+        fields.append("status")
+    if has_field("Purchase Receipt", "posting_date"):
+        fields.append("posting_date")
+    if has_field("Purchase Receipt", "due_date"):
+        fields.append("due_date")
+
+    rows = get_list_safe("Purchase Receipt", filters=base_filters, fields=fields, limit_page_length=10000)
+    today = getdate(nowdate())
+    counts = {"total": get_count("Purchase Receipt", base_filters), "completed": 0, "pending": 0, "overdue": 0}
+
+    for row in rows:
+        status = normalize_status(row).lower()
+        if row.get("docstatus") == 1 or "complete" in status or "closed" in status:
+            counts["completed"] += 1
+        else:
+            counts["pending"] += 1
+        due_date = row.get("due_date") or row.get("posting_date")
+        if due_date and getdate(due_date) < add_days(today, -30) and row.get("docstatus") != 1:
+            counts["overdue"] += 1
+
+    if counts["total"] and counts["total"] > len(rows):
+        counts["pending"] += counts["total"] - len(rows)
+
+    return counts
+
+
+def get_payment_summary(filters):
+    rows = get_receipt_payment_rows(filters, limit=5000)
+    total_outstanding = sum(flt(row.get("outstanding_amount")) for row in rows)
+    overdue_outstanding = sum(flt(row.get("outstanding_amount")) for row in rows if row.get("is_overdue"))
+    return {"total": total_outstanding, "overdue": overdue_outstanding}
+
+
+def get_receipt_payment_rows(filters, limit=20):
+    if not doctype_exists("Purchase Receipt"):
+        return []
+
+    pr_fields = ["name", "supplier", "docstatus"]
+    for fieldname in ("posting_date", "due_date", "rounded_total", "grand_total", "base_grand_total", "custom_project_name", "project"):
+        if has_field("Purchase Receipt", fieldname):
+            pr_fields.append(fieldname)
+
+    receipts = get_list_safe(
+        "Purchase Receipt",
+        filters=build_filters("Purchase Receipt", filters),
+        fields=pr_fields,
+        order_by="modified desc",
+        limit_page_length=limit,
+    )
+
+    names = [row.name for row in receipts]
+    paid_map = get_paid_amounts(names)
+    today = getdate(nowdate())
+    rows = []
+
+    for row in receipts:
+        total = get_purchase_receipt_total(row)
+        paid = flt(paid_map.get(row.name, {}).get("paid_amount"))
+        outstanding = max(total - paid, 0)
+        due_date = row.get("due_date") or row.get("posting_date")
+        is_overdue = bool(outstanding and due_date and getdate(due_date) < add_days(today, -30))
+        if outstanding <= 0:
+            payment_status = "Paid"
+        elif paid > 0:
+            payment_status = "Partial"
+        else:
+            payment_status = "Pending"
+
+        rows.append({
+            "purchase_receipt": row.name,
+            "supplier": row.get("supplier") or "-",
+            "project": row.get("custom_project_name") or row.get("project") or "-",
+            "total_amount": total,
+            "paid_amount": paid,
+            "outstanding_amount": outstanding,
+            "payment_status": payment_status,
+            "payment_date": paid_map.get(row.name, {}).get("payment_date") or "",
+            "is_overdue": is_overdue,
+        })
+
+    return rows
+
+
+def get_paid_amounts(receipt_names):
+    if not receipt_names or not doctype_exists("Procureflow Payment Entry"):
+        return {}
+    if not has_field("Procureflow Payment Entry", "purchase_receipt") or not has_field("Procureflow Payment Entry", "amount"):
+        return {}
+
+    fields = ["purchase_receipt", "sum(amount) as paid_amount"]
+    if has_field("Procureflow Payment Entry", "payment_date"):
+        fields.append("max(payment_date) as payment_date")
+
+    rows = get_all_safe(
+        "Procureflow Payment Entry",
+        filters={"purchase_receipt": ["in", receipt_names], "docstatus": 1},
+        fields=fields,
+        group_by="purchase_receipt",
+    )
+    return {row.purchase_receipt: row for row in rows}
+
+
+def get_overview(filters):
+    to_date = getdate(filters["to_date"])
+    start_month = get_first_day(to_date)
+    months = []
+    po_amount_field = get_amount_field("Purchase Order")
+    max_value = 0
+
+    for offset in range(5, -1, -1):
+        month_start = add_months(start_month, -offset)
+        month_end = get_last_day(month_start)
+        month_filters = build_filters("Purchase Order", filters)
+        date_field = DATE_FIELDS["Purchase Order"]
+        if has_field("Purchase Order", date_field):
+            month_filters[date_field] = ["between", [str(month_start), str(month_end)]]
+        value = get_sum("Purchase Order", po_amount_field, month_filters)
+        max_value = max(max_value, value)
+        months.append({
+            "label": calendar.month_abbr[month_start.month],
+            "month": str(month_start)[:7],
+            "value": value,
+            "is_current": month_start.month == to_date.month and month_start.year == to_date.year,
+        })
+
+    for row in months:
+        row["percent"] = 8 if not max_value else max(8, round((row["value"] / max_value) * 100, 1))
+
+    current = months[-1]["value"] if months else 0
+    previous = months[-2]["value"] if len(months) > 1 else 0
+    mom_growth = 0 if not previous else ((current - previous) / previous) * 100
+
+    ytd_filters = build_filters("Purchase Order", filters)
+    date_field = DATE_FIELDS["Purchase Order"]
+    if has_field("Purchase Order", date_field):
+        ytd_filters[date_field] = ["between", [str(getdate(f"{to_date.year}-01-01")), str(to_date)]]
+    ytd_total = get_sum("Purchase Order", po_amount_field, ytd_filters)
+
+    return {
+        "monthly_po_value": months,
+        "total_ytd": ytd_total,
+        "mom_growth": mom_growth,
+        "avg_monthly": sum(row["value"] for row in months) / len(months) if months else 0,
+    }
+
+
+def add_months(date_obj, months):
+    month = date_obj.month - 1 + months
+    year = date_obj.year + month // 12
+    month = month % 12 + 1
+    day = min(date_obj.day, calendar.monthrange(year, month)[1])
+    return getdate(f"{year}-{month:02d}-{day:02d}")
+
+
+def get_recent(doctype, filters, field_map, limit=5):
+    fields = ["name", "docstatus"]
+    for fieldname in field_map.values():
+        if fieldname and fieldname not in fields and has_field(doctype, fieldname):
+            fields.append(fieldname)
+    for candidate in ("status", "workflow_state"):
+        if has_field(doctype, candidate) and candidate not in fields:
+            fields.append(candidate)
+
+    rows = get_list_safe(
+        doctype,
+        filters=build_filters(doctype, filters),
+        fields=fields,
+        order_by="modified desc",
+        limit_page_length=limit,
+    )
+
+    result = []
+    for row in rows:
+        item = {"name": row.name, "status": normalize_status(row)}
+        for key, fieldname in field_map.items():
+            item[key] = row.get(fieldname) if fieldname else None
+        result.append(item)
+    return result
+
+
+def get_operations(filters):
+    po_amount_field = get_amount_field("Purchase Order")
+    return {
+        "material_requests": get_recent(
+            "Material Request",
+            filters,
+            {
+                "project": first_existing_field("Material Request", PROJECT_FIELDS["Material Request"]),
+                "priority": first_existing_field("Material Request", ("custom_priority", "priority")),
+            },
+        ),
+        "supplier_quotations": get_recent(
+            "Supplier Quotation",
+            filters,
+            {
+                "supplier": "supplier" if has_field("Supplier Quotation", "supplier") else None,
+                "project": first_existing_field("Supplier Quotation", PROJECT_FIELDS["Supplier Quotation"]),
+            },
+        ),
+        "purchase_orders": get_recent(
+            "Purchase Order",
+            filters,
+            {
+                "supplier": "supplier" if has_field("Purchase Order", "supplier") else None,
+                "value": po_amount_field,
+            },
+        ),
+        "top_suppliers": get_top_suppliers(filters),
+    }
+
+
+def get_top_suppliers(filters):
+    amount_field = get_amount_field("Purchase Order")
+    if not amount_field or not has_field("Purchase Order", "supplier"):
+        return []
+    rows = get_list_safe(
+        "Purchase Order",
+        filters=build_filters("Purchase Order", filters),
+        fields=["supplier", f"sum({amount_field}) as total"],
+        group_by="supplier",
+        order_by=f"sum({amount_field}) desc",
+        limit_page_length=5,
+    )
+    max_value = max([flt(row.get("total")) for row in rows] or [0])
+    return [
+        {
+            "supplier": row.get("supplier") or "Unknown Supplier",
+            "total": flt(row.get("total")),
+            "percent": 0 if not max_value else round((flt(row.get("total")) / max_value) * 100, 1),
+        }
+        for row in rows
+    ]
+
+
+def get_payment_tracking(filters):
+    return get_receipt_payment_rows(filters, limit=10)
+
+
+def get_analytics(filters):
+    return {
+        "project_wise": get_grouped_sum("Purchase Order", filters, first_existing_field("Purchase Order", PROJECT_FIELDS["Purchase Order"])),
+        "category_wise": get_grouped_sum("Purchase Order", filters, first_existing_field("Purchase Order", ("custom_category", "category"))),
+        "priority_wise": get_grouped_count("Material Request", filters, first_existing_field("Material Request", ("custom_priority", "priority"))),
+        "supplier_wise": get_grouped_sum("Purchase Order", filters, "supplier" if has_field("Purchase Order", "supplier") else None),
+    }
+
+
+def get_grouped_sum(doctype, filters, group_field, limit=5):
+    amount_field = get_amount_field(doctype)
+    if not group_field or not amount_field:
+        return []
+    rows = get_list_safe(
+        doctype,
+        filters=build_filters(doctype, filters),
+        fields=[group_field, f"sum({amount_field}) as value"],
+        group_by=group_field,
+        order_by=f"sum({amount_field}) desc",
+        limit_page_length=limit,
+    )
+    return [{"label": row.get(group_field) or "Not Set", "value": flt(row.get("value"))} for row in rows]
+
+
+def get_grouped_count(doctype, filters, group_field, limit=5):
+    if not group_field:
+        return []
+    rows = get_list_safe(
+        doctype,
+        filters=build_filters(doctype, filters),
+        fields=[group_field, "count(name) as value"],
+        group_by=group_field,
+        order_by="count(name) desc",
+        limit_page_length=limit,
+    )
+    return [{"label": row.get(group_field) or "Not Set", "value": flt(row.get("value"))} for row in rows]
+
+
+def get_filter_options():
+    companies = []
+    if doctype_exists("Company"):
+        companies = [row.name for row in get_list_safe("Company", fields=["name"], order_by="name asc", limit_page_length=100)]
+
+    project_doctype = "Project Master" if doctype_exists("Project Master") else "Project"
+    projects = []
+    if doctype_exists(project_doctype):
+        projects = [row.name for row in get_list_safe(project_doctype, fields=["name"], order_by="name asc", limit_page_length=200)]
+
+    return {"companies": companies, "projects": projects}
