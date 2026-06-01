@@ -17,11 +17,15 @@ doctype_js = {
 
 
 doc_events = {
-    "Purchase Order": {
-        "before_save": "procureflow.api.copy_receipt_from_material_request"
+    'Purchase Order': {
+        'validate': 'procureflow.signature_api.set_purchase_order_company_signature',
+        'before_save': [
+            'procureflow.api.copy_receipt_from_material_request',
+            'procureflow.signature_api.set_purchase_order_company_signature',
+        ],
     },
-    "Purchase Receipt": {
-        "before_save": "procureflow.api.populate_purchase_receipt_project_company_from_purchase_order"
+    'Purchase Receipt': {
+        'before_save': 'procureflow.api.populate_purchase_receipt_project_company_from_purchase_order'
     }
 }
 
@@ -55,6 +59,7 @@ fixtures = [
                 "Purchase Order-custom_add_receipt",
                 "Purchase Order-custom_priority",
                 "Purchase Order-custom_authorized_signature",
+                "Purchase Order-custom_company_signature",
                 "Purchase Order-custom_rejection_remark",
 
                 # Purchase Receipt
