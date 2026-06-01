@@ -35,10 +35,12 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 		$(this.wrapper).addClass("pf-dashboard-page");
 		$(this.wrapper).find(".page-head").hide();
 
+		const date_range = this.get_current_date_range();
 		this.state = {
 			company: "",
 			project: "",
-			month: this.get_current_month(),
+			from_date: date_range.from_date,
+			to_date: date_range.to_date,
 		};
 
 		this.data = null;
@@ -56,9 +58,16 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 		}, 2000);
 	}
 
-	get_current_month() {
+	format_input_date(date) {
+		return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+	}
+
+	get_current_date_range() {
 		const today = new Date();
-		return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+		return {
+			from_date: this.format_input_date(new Date(today.getFullYear(), today.getMonth(), 1)),
+			to_date: this.format_input_date(new Date(today.getFullYear(), today.getMonth() + 1, 0)),
+		};
 	}
 
 	make() {
@@ -79,9 +88,15 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 								<i class="ti ti-map-pin"></i>
 								<select data-filter="project"><option value="">All Projects</option></select>
 							</label>
-							<label class="pf-chip pf-month-chip">
-								<i class="ti ti-calendar"></i>
-								<input type="month" data-filter="month" value="${this.state.month}">
+							<label class="pf-chip pf-date-chip">
+								<i class="ti ti-calendar-event"></i>
+								<span class="pf-date-label">From</span>
+								<input type="date" data-filter="from_date" value="${this.state.from_date}">
+							</label>
+							<label class="pf-chip pf-date-chip">
+								<i class="ti ti-calendar-due"></i>
+								<span class="pf-date-label">To</span>
+								<input type="date" data-filter="to_date" value="${this.state.to_date}">
 							</label>
 							<button class="pf-chip-btn" data-action="refresh" title="${__("Refresh")}"><i class="ti ti-refresh"></i></button>
 							<div class="pf-user-pill">
@@ -128,6 +143,10 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 		root.on("change", "[data-filter]", (event) => {
 			const field = $(event.currentTarget).data("filter");
 			this.state[field] = $(event.currentTarget).val() || "";
+			if (this.state.from_date && this.state.to_date && this.state.from_date > this.state.to_date) {
+				const other = field === "from_date" ? "to_date" : "from_date";
+				this.state[other] = this.state[field];
+			}
 			this.refresh();
 		});
 		root.on("click", ".pf-nav-item", (event) => {
@@ -139,6 +158,15 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 				frappe.set_route(route.split("/"));
 			}
 		});
+		root.on("click", ".pf-clickable-row", (event) => {
+			const row = $(event.currentTarget);
+			this.open_doc(row.data("doctype"), row.data("name"));
+		});
+		root.on("click", "[data-action='open-payment-dashboard']", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			this.open_payment_dashboard();
+		});
 	}
 
 	refresh() {
@@ -148,7 +176,8 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 			args: {
 				company: this.state.company,
 				project: this.state.project,
-				month: this.state.month,
+				from_date: this.state.from_date,
+				to_date: this.state.to_date,
 			},
 			callback: (r) => {
 				this.data = r.message || {};
@@ -179,7 +208,11 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 		const options = this.data.filter_options || {};
 		this.fill_select("company", options.companies || [], "All Companies", this.state.company);
 		this.fill_select("project", options.projects || [], "All Projects", this.state.project);
-		$(this.page.main).find("[data-filter='month']").val(this.state.month);
+		const filters = this.data.filters || {};
+		this.state.from_date = filters.from_date || this.state.from_date;
+		this.state.to_date = filters.to_date || this.state.to_date;
+		$(this.page.main).find("[data-filter='from_date']").val(this.state.from_date);
+		$(this.page.main).find("[data-filter='to_date']").val(this.state.to_date);
 	}
 
 	fill_select(field, values, empty_label, selected) {
@@ -196,10 +229,9 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 		const filters = this.data.filters || {};
 		const company = filters.company || "All Companies";
 		const project = filters.project || "All Projects";
-		const month = this.format_month(filters.month || this.state.month);
-		$(this.page.main).find("[data-role='subtitle']").text(`Live overview · ${company} · ${project} · ${month}`);
+		const date_range = `${this.format_date(filters.from_date || this.state.from_date)} to ${this.format_date(filters.to_date || this.state.to_date)}`;
+		$(this.page.main).find("[data-role='subtitle']").text(`Live overview ? ${company} ? ${project} ? ${date_range}`);
 	}
-
 	render_kpis() {
 		const kpis = this.data.kpis || {};
 		const mr = kpis.material_requests || {};
@@ -207,6 +239,7 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 		const pr = kpis.purchase_receipts || {};
 		const po_value = kpis.total_po_value || {};
 		const outstanding = kpis.outstanding_amount || {};
+		const outstanding_breakdown = this.data.outstanding_breakdown || {};
 
 		$(this.page.main).find("[data-role='kpis']").html(`
 			${this.kpi_card("Material Requests", "file-text", "blue", mr.total, [
@@ -225,11 +258,9 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 				["gray", `${pr.overdue || 0} Overdue`, "clock-exclamation"],
 			])}
 			${this.kpi_card("Total PO Value", "coin-rupee", "amber", this.money(po_value.total), [
-				["blue", `This Month ${this.money(po_value.current_month)}`, ""],
+				["blue", `Period ${this.money(po_value.current_month)}`, ""],
 			], true)}
-			${this.kpi_card("Outstanding Amount", "alert-circle", "red", this.money(outstanding.total), [
-				["red", `Overdue ${this.money(outstanding.overdue)}`, "alert-triangle"],
-			], true)}
+			${this.outstanding_kpi_card(outstanding, outstanding_breakdown)}
 		`);
 
 		$(this.page.main).find("[data-badge='mr_pending']").text(mr.pending || 0).toggle(Boolean(mr.pending));
@@ -253,6 +284,44 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 		`;
 	}
 
+	outstanding_kpi_card(outstanding, breakdown) {
+		const total = breakdown.total_outstanding != null ? breakdown.total_outstanding : outstanding.total;
+		const pending = breakdown.pending_outstanding != null ? breakdown.pending_outstanding : outstanding.pending;
+		const partial = breakdown.partial_outstanding != null ? breakdown.partial_outstanding : outstanding.partial;
+		const over_30 = breakdown.over_30_days_outstanding != null ? breakdown.over_30_days_outstanding : outstanding.over_30_days || outstanding.overdue;
+		const top_supplier = breakdown.top_supplier || "-";
+		const top_project = breakdown.top_project || "-";
+
+		return `
+			<div class="pf-kpi-card c-red pf-kpi-clickable pf-outstanding-kpi" data-action="open-payment-dashboard" title="${__("Open Payment Tracking Dashboard")}">
+				<div class="pf-kpi-top">
+					<span class="pf-kpi-label">Outstanding Amount</span>
+					<div class="pf-kpi-icon"><i class="ti ti-alert-circle"></i></div>
+				</div>
+				<div class="pf-kpi-value sm">${this.money(total)}</div>
+				<div class="pf-outstanding-grid">
+					${this.outstanding_item("Pending", pending)}
+					${this.outstanding_item("Partial", partial)}
+					${this.outstanding_item("> 30 days", over_30)}
+					${this.outstanding_item("Top Supplier", `${top_supplier} - ${this.money_short(breakdown.top_supplier_outstanding)}`, true)}
+					${this.outstanding_item("Top Project", `${top_project} - ${this.money_short(breakdown.top_project_outstanding)}`, true)}
+				</div>
+				<button class="pf-detail-link" type="button">
+					<span>View Details</span><i class="ti ti-arrow-up-right"></i>
+				</button>
+			</div>
+		`;
+	}
+
+	outstanding_item(label, value, is_text) {
+		return `
+			<div class="pf-outstanding-item ${is_text ? "is-text" : ""}">
+				<span>${frappe.utils.escape_html(label)}</span>
+				<strong>${is_text ? frappe.utils.escape_html(String(value || "-")) : this.money(value)}</strong>
+			</div>
+		`;
+	}
+
 	render_overview() {
 		const overview = this.data.overview || {};
 		const months = overview.monthly_po_value || [];
@@ -270,15 +339,15 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 			<div class="pf-card pf-trend-card">
 				<div class="pf-card-header">
 					<div class="pf-card-title"><i class="ti ti-chart-bar-popular"></i>Monthly PO Value Trend</div>
-					<span class="pf-pill ${overview.mom_growth >= 0 ? "green" : "red"}">${overview.mom_growth >= 0 ? "+" : ""}${this.number(overview.mom_growth, 1)}% MoM</span>
+					<span class="pf-pill ${overview.mom_growth >= 0 ? "green" : "red"}">${overview.mom_growth >= 0 ? "+" : ""}${this.number(overview.mom_growth, 1)}% Growth</span>
 				</div>
 				<div class="pf-bar-area">
 					${bars || this.empty_state("No PO value for this period")}
 					<div class="pf-axis-line"></div>
 				</div>
 				<div class="pf-chart-footer">
-					<div class="pf-cf-item">Total YTD: <span class="pf-cf-val">${this.money(overview.total_ytd)}</span></div>
-					<div class="pf-cf-item">MoM Growth: <span class="pf-cf-val ${overview.mom_growth >= 0 ? "up" : "down"}">${overview.mom_growth >= 0 ? "+" : ""}${this.number(overview.mom_growth, 1)}%</span></div>
+					<div class="pf-cf-item">Total Period: <span class="pf-cf-val">${this.money(overview.period_total || overview.total_ytd)}</span></div>
+					<div class="pf-cf-item">Growth: <span class="pf-cf-val ${overview.growth >= 0 ? "up" : "down"}">${overview.growth >= 0 ? "+" : ""}${this.number(overview.growth, 1)}%</span></div>
 					<div class="pf-cf-item">Avg Monthly: <span class="pf-cf-val">${this.money_short(overview.avg_monthly)}</span></div>
 				</div>
 			</div>
@@ -288,24 +357,22 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 	render_operations() {
 		const ops = this.data.operations || {};
 		$(this.page.main).find("[data-role='operations']").html(`
-			${this.table_card("Material Requests", "clipboard-list", ["MR No.", "Project", "Priority", "Status"], (ops.material_requests || []).map((row) => [
-				this.mono(row.name),
-				row.project || "-",
-				this.badge(row.priority || "Not Set", this.priority_tone(row.priority)),
-				this.badge(row.status, this.status_tone(row.status)),
-			]))}
-			${this.table_card("Supplier Quotations", "file-invoice", ["SQ No.", "Supplier", "Project", "Status"], (ops.supplier_quotations || []).map((row) => [
-				this.mono(row.name),
-				row.supplier || "-",
-				row.project || "-",
-				this.badge(row.status, this.status_tone(row.status)),
-			]))}
-			${this.table_card("Purchase Orders", "shopping-cart", ["PO No.", "Supplier", "Value", "Status"], (ops.purchase_orders || []).map((row) => [
-				this.mono(row.name),
-				row.supplier || "-",
-				this.money(row.value),
-				this.badge(row.status, this.status_tone(row.status)),
-			]))}
+			${this.table_card("Material Requests", "clipboard-list", ["MR No.", "Project", "Priority", "Status"], (ops.material_requests || []).map((row) =>
+				this.clickable_table_row("Material Request", row.name, [
+					this.mono(row.name),
+					frappe.utils.escape_html(row.project || "-"),
+					this.badge(row.priority || "Not Set", this.priority_tone(row.priority)),
+					this.badge(row.status, this.status_tone(row.status)),
+				], "Open Material Request")
+			))}
+			${this.table_card("Purchase Orders", "shopping-cart", ["PO No.", "Supplier", "Value", "Status"], (ops.purchase_orders || []).map((row) =>
+				this.clickable_table_row("Purchase Order", row.name, [
+					this.mono(row.name),
+					frappe.utils.escape_html(row.supplier || "-"),
+					this.money(row.value),
+					this.badge(row.status, this.status_tone(row.status)),
+				], "Open Purchase Order")
+			))}
 			${this.top_suppliers(ops.top_suppliers || [])}
 		`);
 	}
@@ -313,7 +380,13 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 	table_card(title, icon, headers, rows) {
 		const head = headers.map((item) => `<th>${frappe.utils.escape_html(item)}</th>`).join("");
 		const body = rows.length
-			? rows.map((cols) => `<tr>${cols.map((col) => `<td>${col == null ? "-" : col}</td>`).join("")}</tr>`).join("")
+			? rows.map((row) => {
+				const item = Array.isArray(row) ? { cols: row } : row;
+				const attrs = item.doctype && item.name
+					? ` class="pf-clickable-row" data-doctype="${this.escape_attr(item.doctype)}" data-name="${this.escape_attr(item.name)}" title="${this.escape_attr(item.title || "Open Record")}"`
+					: "";
+				return `<tr${attrs}>${item.cols.map((col) => `<td>${col == null ? "-" : col}</td>`).join("")}</tr>`;
+			}).join("")
 			: `<tr><td colspan="${headers.length}">${this.empty_state("No records found")}</td></tr>`;
 
 		return `
@@ -330,11 +403,18 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 		`;
 	}
 
+	clickable_table_row(doctype, name, cols, title) {
+		if (!name) {
+			return cols;
+		}
+		return { doctype, name, title, cols };
+	}
+
 	top_suppliers(rows) {
 		const max_rows = rows.length ? rows : [];
 		const body = max_rows.length
 			? max_rows.map((row, index) => `
-				<tr>
+				<tr ${this.supplier_row_attrs(row.supplier)}>
 					<td class="pf-sup-rank">${String(index + 1).padStart(2, "0")}</td>
 					<td>
 						<div class="pf-sup-name">${frappe.utils.escape_html(row.supplier || "Unknown Supplier")}</div>
@@ -356,15 +436,63 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 		`;
 	}
 
+	supplier_row_attrs(supplier) {
+		if (!supplier || supplier === "Unknown Supplier" || supplier === "Not Set" || supplier === "-") {
+			return "";
+		}
+		return `class="pf-clickable-row" data-doctype="Supplier" data-name="${this.escape_attr(supplier)}" title="${this.escape_attr("Open Supplier")}"`;
+	}
+
 	render_analytics() {
 		const analytics = this.data.analytics || {};
+		const conversion = analytics.mr_to_po_conversion || {};
+		const approval = analytics.avg_po_approval_time || {};
+		const outstanding = analytics.outstanding_over_30_days || {};
+		const periodSpend = analytics.total_period_spend || {};
+		const supplierShare = analytics.top_supplier_share || {};
 		const cards = [
-			["Project wise procurement value", "building-community", "blue", analytics.project_wise || [], true],
-			["Category wise spend", "category", "purple", analytics.category_wise || [], true],
-			["Priority wise MR count", "alert-triangle", "amber", analytics.priority_wise || [], false],
-			["Supplier wise PO value", "users", "teal", analytics.supplier_wise || [], true],
+			this.metric_card("MR to PO conversion", "arrows-exchange", "blue", `${this.number(conversion.value, 1)}%`, [
+				["Converted", this.number(conversion.converted, 0)],
+				["Material Requests", this.number(conversion.material_requests, 0)],
+				["Method", conversion.fallback ? "PO/MR fallback" : "Linked PO"],
+			]),
+			this.metric_card("Avg PO approval time", "clock-check", "teal", `${this.number(approval.value, 1)} days`, [
+				["Approved POs", this.number(approval.count, 0)],
+			]),
+			this.metric_card("Outstanding > 30 days", "alert-triangle", "amber", this.money(outstanding.value), [
+				["Receipts", this.number(outstanding.count, 0)],
+			]),
+			this.metric_card("Total Period Spend", "coin-rupee", "purple", this.money(periodSpend.value), [
+				["Based on", "Purchase Orders"],
+			]),
+			this.metric_card("Top Supplier Share", "chart-pie", "teal", `${this.number(supplierShare.value, 1)}%`, [
+				["Supplier", supplierShare.supplier || "-"],
+				["PO Value", this.money(supplierShare.total)],
+			]),
 		];
-		$(this.page.main).find("[data-role='analytics']").html(cards.map((card) => this.insight_card(...card)).join(""));
+		$(this.page.main).find("[data-role='analytics']").html(cards.join(""));
+	}
+
+	metric_card(label, icon, tone, value, rows) {
+		const detail = rows.map(([rowLabel, rowValue]) => `
+			<div class="pf-mini-row">
+				<span>${frappe.utils.escape_html(rowLabel || "-")}</span>
+				<strong>${frappe.utils.escape_html(String(rowValue == null ? "-" : rowValue))}</strong>
+			</div>
+		`).join("");
+
+		return `
+			<div class="pf-insight-card">
+				<div class="pf-insight-top">
+					<div class="pf-ins-icon ${tone}"><i class="ti ti-${icon}"></i></div>
+					<div>
+						<div class="pf-ins-label">${frappe.utils.escape_html(label)}</div>
+						<div class="pf-ins-val">${frappe.utils.escape_html(String(value || "-"))}</div>
+					</div>
+				</div>
+				<div class="pf-mini-list">${detail || this.empty_state("No data")}</div>
+			</div>
+		`;
 	}
 
 	insight_card(label, icon, tone, rows, is_money) {
@@ -393,6 +521,21 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 
 	empty_state(text) {
 		return `<div class="pf-empty">${frappe.utils.escape_html(text)}</div>`;
+	}
+
+	open_doc(doctype, name) {
+		if (!doctype || !name) {
+			return;
+		}
+		frappe.set_route("Form", doctype, String(name));
+	}
+
+	open_payment_dashboard() {
+		frappe.set_route("payment-tracking-dashboard");
+	}
+
+	escape_attr(value) {
+		return frappe.utils.escape_html(String(value || "")).replace(/"/g, "&quot;");
 	}
 
 	mono(value) {
@@ -451,11 +594,11 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 		});
 	}
 
-	format_month(value) {
+	format_date(value) {
 		if (!value) return "";
-		const [year, month] = value.split("-");
-		const date = new Date(Number(year), Number(month) - 1, 1);
-		return date.toLocaleString("en-IN", { month: "short", year: "numeric" });
+		const [year, month, day] = value.split("-");
+		const date = new Date(Number(year), Number(month) - 1, Number(day));
+		return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 	}
 
 	initials(value) {

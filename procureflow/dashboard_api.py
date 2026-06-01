@@ -2,7 +2,7 @@ import calendar
 from collections import defaultdict
 
 import frappe
-from frappe.utils import add_days, flt, get_first_day, get_last_day, getdate, nowdate
+from frappe.utils import add_days, flt, get_datetime, get_first_day, get_last_day, getdate, nowdate
 
 
 DATE_FIELDS = {
@@ -31,14 +31,16 @@ COMPANY_FIELDS = {
 @frappe.whitelist()
 def get_procurement_dashboard_data(company=None, project=None, month=None, from_date=None, to_date=None):
     filters = get_dashboard_filters(company=company, project=project, month=month, from_date=from_date, to_date=to_date)
+    outstanding_breakdown = get_outstanding_breakdown(filters)
 
     return {
         "filters": filters,
         "filter_options": get_filter_options(),
-        "kpis": get_kpis(filters),
+        "kpis": get_kpis(filters, outstanding_breakdown),
         "overview": get_overview(filters),
         "operations": get_operations(filters),
         "payment_tracking": get_payment_tracking(filters),
+        "outstanding_breakdown": outstanding_breakdown,
         "analytics": get_analytics(filters),
     }
 
@@ -121,12 +123,27 @@ def get_purchase_receipt_total(row):
     return flt(row.get("rounded_total")) or flt(row.get("grand_total")) or flt(row.get("base_grand_total"))
 
 
+def get_dashboard_date_field(doctype, date_field=None):
+    preferred = date_field or DATE_FIELDS.get(doctype)
+    if preferred and has_field(doctype, preferred):
+        return preferred
+    return "creation" if has_field(doctype, "creation") else None
+
+
+def get_date_range_values(fieldname, dashboard_filters):
+    from_date = dashboard_filters["from_date"]
+    to_date = dashboard_filters["to_date"]
+    if fieldname in ("creation", "modified"):
+        return [f"{from_date} 00:00:00", f"{to_date} 23:59:59"]
+    return [from_date, to_date]
+
+
 def build_filters(doctype, dashboard_filters, date_field=None, include_date=True):
     filters = {}
-    date_field = date_field or DATE_FIELDS.get(doctype)
+    resolved_date_field = get_dashboard_date_field(doctype, date_field)
 
-    if include_date and date_field and has_field(doctype, date_field):
-        filters[date_field] = ["between", [dashboard_filters["from_date"], dashboard_filters["to_date"]]]
+    if include_date and resolved_date_field:
+        filters[resolved_date_field] = ["between", get_date_range_values(resolved_date_field, dashboard_filters)]
 
     company = dashboard_filters.get("company")
     if company:
@@ -266,7 +283,7 @@ def get_sql_where_clause(doctype, filters):
     return " and ".join(clauses or ["1=1"]), values
 
 
-def get_kpis(filters):
+def get_kpis(filters, outstanding_breakdown=None):
     mr_counts = get_status_counts("Material Request", filters)
     po_counts = get_status_counts("Purchase Order", filters)
     pr_counts = get_purchase_receipt_counts(filters)
@@ -274,14 +291,7 @@ def get_kpis(filters):
     po_filters = build_filters("Purchase Order", filters)
     total_po_value = get_sum("Purchase Order", po_amount_field, po_filters)
 
-    month_start = get_first_day(getdate(filters["to_date"]))
-    month_end = get_last_day(month_start)
-    month_filters = dict(po_filters)
-    date_field = DATE_FIELDS["Purchase Order"]
-    if has_field("Purchase Order", date_field):
-        month_filters[date_field] = ["between", [str(month_start), str(month_end)]]
-
-    payment_summary = get_payment_summary(filters)
+    payment_summary = get_payment_summary(filters, outstanding_breakdown)
 
     return {
         "material_requests": mr_counts,
@@ -289,7 +299,7 @@ def get_kpis(filters):
         "purchase_receipts": pr_counts,
         "total_po_value": {
             "total": total_po_value,
-            "current_month": get_sum("Purchase Order", po_amount_field, month_filters),
+            "current_month": total_po_value,
         },
         "outstanding_amount": payment_summary,
     }
@@ -325,11 +335,73 @@ def get_purchase_receipt_counts(filters):
     return counts
 
 
-def get_payment_summary(filters):
-    rows = get_receipt_payment_rows(filters, limit=5000)
-    total_outstanding = sum(flt(row.get("outstanding_amount")) for row in rows)
-    overdue_outstanding = sum(flt(row.get("outstanding_amount")) for row in rows if row.get("is_overdue"))
-    return {"total": total_outstanding, "overdue": overdue_outstanding}
+def get_payment_summary(filters, breakdown=None):
+    breakdown = breakdown or get_outstanding_breakdown(filters)
+    return {
+        "total": breakdown.get("total_outstanding"),
+        "overdue": breakdown.get("over_30_days_outstanding"),
+        "pending": breakdown.get("pending_outstanding"),
+        "partial": breakdown.get("partial_outstanding"),
+        "over_30_days": breakdown.get("over_30_days_outstanding"),
+    }
+
+
+def get_outstanding_breakdown(filters):
+    rows = get_receipt_payment_rows(filters, limit=10000)
+    supplier_totals = defaultdict(float)
+    project_totals = defaultdict(float)
+    today = getdate(nowdate())
+    totals = {
+        "total_outstanding": 0,
+        "pending_outstanding": 0,
+        "partial_outstanding": 0,
+        "over_30_days_outstanding": 0,
+        "top_supplier": "",
+        "top_supplier_outstanding": 0,
+        "top_project": "",
+        "top_project_outstanding": 0,
+        "receipt_count": 0,
+        "pending_count": 0,
+        "partial_count": 0,
+    }
+
+    for row in rows:
+        outstanding = flt(row.get("outstanding_amount"))
+        if outstanding <= 0:
+            continue
+
+        paid_amount = flt(row.get("paid_amount"))
+        supplier = row.get("supplier") if row.get("supplier") not in ("", "-") else "Not Set"
+        project = row.get("project") if row.get("project") not in ("", "-") else "Not Set"
+        age_date = row.get("posting_date") or row.get("creation")
+
+        totals["receipt_count"] += 1
+        totals["total_outstanding"] += outstanding
+
+        if paid_amount > 0:
+            totals["partial_outstanding"] += outstanding
+            totals["partial_count"] += 1
+        else:
+            totals["pending_outstanding"] += outstanding
+            totals["pending_count"] += 1
+
+        if age_date and getdate(age_date) < add_days(today, -30):
+            totals["over_30_days_outstanding"] += outstanding
+
+        supplier_totals[supplier] += outstanding
+        project_totals[project] += outstanding
+
+    if supplier_totals:
+        top_supplier, supplier_outstanding = max(supplier_totals.items(), key=lambda item: item[1])
+        totals["top_supplier"] = top_supplier
+        totals["top_supplier_outstanding"] = supplier_outstanding
+
+    if project_totals:
+        top_project, project_outstanding = max(project_totals.items(), key=lambda item: item[1])
+        totals["top_project"] = top_project
+        totals["top_project_outstanding"] = project_outstanding
+
+    return totals
 
 
 def get_receipt_payment_rows(filters, limit=20):
@@ -337,7 +409,7 @@ def get_receipt_payment_rows(filters, limit=20):
         return []
 
     pr_fields = ["name", "supplier", "docstatus"]
-    for fieldname in ("posting_date", "due_date", "rounded_total", "grand_total", "base_grand_total", "custom_project_name", "project"):
+    for fieldname in ("posting_date", "due_date", "creation", "rounded_total", "grand_total", "base_grand_total", "custom_project_name", "project"):
         if has_field("Purchase Receipt", fieldname):
             pr_fields.append(fieldname)
 
@@ -376,6 +448,8 @@ def get_receipt_payment_rows(filters, limit=20):
             "outstanding_amount": outstanding,
             "payment_status": payment_status,
             "payment_date": paid_map.get(row.name, {}).get("payment_date") or "",
+            "posting_date": row.get("posting_date") or "",
+            "creation": row.get("creation") or "",
             "is_overdue": is_overdue,
         })
 
@@ -402,48 +476,53 @@ def get_paid_amounts(receipt_names):
 
 
 def get_overview(filters):
+    from_date = getdate(filters["from_date"])
     to_date = getdate(filters["to_date"])
-    start_month = get_first_day(to_date)
+    start_month = get_first_day(from_date)
+    end_month = get_first_day(to_date)
     months = []
     po_amount_field = get_amount_field("Purchase Order")
     max_value = 0
+    cursor = start_month
 
-    for offset in range(5, -1, -1):
-        month_start = add_months(start_month, -offset)
+    while cursor <= end_month:
+        month_start = cursor
         month_end = get_last_day(month_start)
+        range_start = max(month_start, from_date)
+        range_end = min(month_end, to_date)
         month_filters = build_filters("Purchase Order", filters)
-        date_field = DATE_FIELDS["Purchase Order"]
-        if has_field("Purchase Order", date_field):
-            month_filters[date_field] = ["between", [str(month_start), str(month_end)]]
+        date_field = get_dashboard_date_field("Purchase Order")
+        if date_field:
+            month_filters[date_field] = ["between", get_date_range_values(date_field, {
+                "from_date": str(range_start),
+                "to_date": str(range_end),
+            })]
         value = get_sum("Purchase Order", po_amount_field, month_filters)
         max_value = max(max_value, value)
         months.append({
             "label": calendar.month_abbr[month_start.month],
             "month": str(month_start)[:7],
             "value": value,
-            "is_current": month_start.month == to_date.month and month_start.year == to_date.year,
+            "is_current": month_start == end_month,
         })
+        cursor = add_months(cursor, 1)
 
     for row in months:
         row["percent"] = 8 if not max_value else max(8, round((row["value"] / max_value) * 100, 1))
 
     current = months[-1]["value"] if months else 0
     previous = months[-2]["value"] if len(months) > 1 else 0
-    mom_growth = 0 if not previous else ((current - previous) / previous) * 100
-
-    ytd_filters = build_filters("Purchase Order", filters)
-    date_field = DATE_FIELDS["Purchase Order"]
-    if has_field("Purchase Order", date_field):
-        ytd_filters[date_field] = ["between", [str(getdate(f"{to_date.year}-01-01")), str(to_date)]]
-    ytd_total = get_sum("Purchase Order", po_amount_field, ytd_filters)
+    growth = 0 if not previous else ((current - previous) / previous) * 100
+    period_total = sum(row["value"] for row in months)
 
     return {
         "monthly_po_value": months,
-        "total_ytd": ytd_total,
-        "mom_growth": mom_growth,
-        "avg_monthly": sum(row["value"] for row in months) / len(months) if months else 0,
+        "total_ytd": period_total,
+        "period_total": period_total,
+        "mom_growth": growth,
+        "growth": growth,
+        "avg_monthly": period_total / len(months) if months else 0,
     }
-
 
 def add_months(date_obj, months):
     month = date_obj.month - 1 + months
@@ -490,14 +569,6 @@ def get_operations(filters):
                 "priority": first_existing_field("Material Request", ("custom_priority", "priority")),
             },
         ),
-        "supplier_quotations": get_recent(
-            "Supplier Quotation",
-            filters,
-            {
-                "supplier": "supplier" if has_field("Supplier Quotation", "supplier") else None,
-                "project": first_existing_field("Supplier Quotation", PROJECT_FIELDS["Supplier Quotation"]),
-            },
-        ),
         "purchase_orders": get_recent(
             "Purchase Order",
             filters,
@@ -531,12 +602,105 @@ def get_payment_tracking(filters):
 
 
 def get_analytics(filters):
+    po_amount_field = get_amount_field("Purchase Order")
+    po_filters = build_filters("Purchase Order", filters)
+    period_spend = get_sum("Purchase Order", po_amount_field, po_filters)
+    top_suppliers = get_top_suppliers(filters)
+    top_supplier_total = flt(top_suppliers[0].get("total")) if top_suppliers else 0
+
     return {
+        "mr_to_po_conversion": get_mr_to_po_conversion(filters),
+        "avg_po_approval_time": get_avg_po_approval_time(filters),
+        "outstanding_over_30_days": get_outstanding_over_30_days(filters),
+        "total_period_spend": {"value": period_spend},
+        "top_supplier_share": {
+            "value": 0 if not period_spend else (top_supplier_total / period_spend) * 100,
+            "supplier": top_suppliers[0].get("supplier") if top_suppliers else "",
+            "total": top_supplier_total,
+        },
         "project_wise": get_grouped_sum("Purchase Order", filters, first_existing_field("Purchase Order", PROJECT_FIELDS["Purchase Order"])),
         "category_wise": get_grouped_sum("Purchase Order", filters, first_existing_field("Purchase Order", ("custom_category", "category"))),
         "priority_wise": get_grouped_count("Material Request", filters, first_existing_field("Material Request", ("custom_priority", "priority"))),
         "supplier_wise": get_grouped_sum("Purchase Order", filters, "supplier" if has_field("Purchase Order", "supplier") else None),
     }
+
+
+def get_mr_to_po_conversion(filters):
+    mr_total = get_count("Material Request", build_filters("Material Request", filters))
+    linked_po_count = get_linked_purchase_order_count(filters)
+    po_total = get_count("Purchase Order", build_filters("Purchase Order", filters))
+    converted = linked_po_count if linked_po_count is not None else po_total
+    percentage = 0 if not mr_total else min(100, (converted / mr_total) * 100)
+    return {"value": percentage, "converted": converted, "material_requests": mr_total, "fallback": linked_po_count is None}
+
+
+def get_linked_purchase_order_count(filters):
+    child_doctype = "Purchase Order Item"
+    if not doctype_exists(child_doctype) or not has_field(child_doctype, "material_request") or not has_field(child_doctype, "parent"):
+        return None
+
+    purchase_orders = get_list_safe(
+        "Purchase Order",
+        filters=build_filters("Purchase Order", filters),
+        fields=["name"],
+        limit_page_length=5000,
+    )
+    names = [row.name for row in purchase_orders]
+    if not names:
+        return 0
+
+    try:
+        rows = frappe.db.sql(
+            """
+            select count(distinct parent) as value
+            from `tabPurchase Order Item`
+            where parent in %(names)s
+              and material_request is not null
+              and material_request != ''
+            """,
+            {"names": tuple(names)},
+            as_dict=True,
+        )
+        value = int(rows[0].get("value") or 0) if rows else 0
+        return value or None
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "ProcureFlow dashboard MR to PO conversion failed")
+        return None
+
+def get_avg_po_approval_time(filters):
+    fields = ["name", "creation", "modified", "docstatus"]
+    for candidate in ("status", "workflow_state"):
+        if has_field("Purchase Order", candidate):
+            fields.append(candidate)
+    rows = get_list_safe(
+        "Purchase Order",
+        filters=build_filters("Purchase Order", filters),
+        fields=fields,
+        limit_page_length=5000,
+    )
+    durations = []
+    for row in rows:
+        if status_bucket(normalize_status(row)) != "approved":
+            continue
+        created = get_datetime(row.get("creation")) if row.get("creation") else None
+        approved = get_datetime(row.get("modified")) if row.get("modified") else None
+        if created and approved and approved >= created:
+            durations.append((approved - created).total_seconds() / 86400)
+    value = sum(durations) / len(durations) if durations else 0
+    return {"value": value, "count": len(durations)}
+
+
+def get_outstanding_over_30_days(filters):
+    cutoff = getdate(add_days(nowdate(), -30))
+    total = 0
+    count = 0
+    for row in get_receipt_payment_rows(filters, limit=5000):
+        outstanding = flt(row.get("outstanding_amount"))
+        receipt_date = row.get("posting_date") or row.get("creation")
+        if outstanding > 0 and receipt_date and getdate(receipt_date) < cutoff:
+            total += outstanding
+            count += 1
+    return {"value": total, "count": count}
 
 
 def get_grouped_sum(doctype, filters, group_field, limit=5):
@@ -648,23 +812,27 @@ def get_payment_tracking_dashboard_data(
     company=None,
     project=None,
     supplier=None,
+    status=None,
     payment_status=None,
-    month=None,
     from_date=None,
     to_date=None,
+    search=None,
+    month=None,
     limit=50,
 ):
     filters = get_payment_dashboard_filters(
         company=company,
         project=project,
         supplier=supplier,
-        payment_status=payment_status,
-        month=month,
+        status=status or payment_status,
         from_date=from_date,
         to_date=to_date,
+        search=search,
+        month=month,
         limit=limit,
     )
-    rows = get_payment_dashboard_receipts(filters, limit=5000)
+    rows = get_payment_dashboard_receipts(filters, limit=1000)
+    view_rows = rows[:filters["limit"]]
 
     return {
         "filters": filters,
@@ -673,7 +841,9 @@ def get_payment_tracking_dashboard_data(
         "status_summary": get_payment_status_summary(rows),
         "outstanding_by_supplier": get_payment_group_summary(rows, "supplier", limit=10),
         "outstanding_by_project": get_payment_group_summary(rows, "project", limit=10),
-        "recent_receipts": rows[:filters["limit"]],
+        "ledger_rows": view_rows,
+        "receipt_overview": view_rows,
+        "recent_receipts": view_rows,
         "insights": get_payment_dashboard_insights(rows),
     }
 
@@ -682,16 +852,17 @@ def get_payment_dashboard_filters(
     company=None,
     project=None,
     supplier=None,
-    payment_status=None,
-    month=None,
+    status=None,
     from_date=None,
     to_date=None,
+    search=None,
+    month=None,
     limit=50,
 ):
     filters = get_dashboard_filters(company=company, project=project, month=month, from_date=from_date, to_date=to_date)
-    status = (payment_status or "").strip()
-    if status not in ("Paid", "Partial", "Pending", "Zero"):
-        status = ""
+    payment_status = (status or "").strip()
+    if payment_status not in ("Paid", "Partial", "Pending", "Overdue", "Zero"):
+        payment_status = ""
 
     try:
         limit = min(max(int(limit or 50), 1), 100)
@@ -700,7 +871,9 @@ def get_payment_dashboard_filters(
 
     filters.update({
         "supplier": supplier or "",
-        "payment_status": status,
+        "status": payment_status,
+        "payment_status": payment_status,
+        "search": (search or "").strip(),
         "limit": limit,
     })
     return filters
@@ -719,7 +892,8 @@ def get_payment_filter_options():
 
     options.update({
         "suppliers": suppliers,
-        "payment_statuses": ["Paid", "Partial", "Pending", "Zero"],
+        "payment_statuses": ["Paid", "Partial", "Pending", "Overdue", "Zero"],
+        "statuses": ["Paid", "Partial", "Pending", "Overdue", "Zero"],
     })
     return options
 
@@ -728,7 +902,7 @@ def get_payment_dashboard_receipts(filters, limit=5000):
     if not doctype_exists("Purchase Receipt"):
         return []
 
-    pr_fields = ["name", "supplier", "docstatus", "modified"]
+    pr_fields = ["name", "supplier", "docstatus", "modified", "creation"]
     for fieldname in (
         "posting_date",
         "due_date",
@@ -763,22 +937,37 @@ def get_payment_dashboard_receipts(filters, limit=5000):
         paid_info = paid_map.get(receipt.name, {})
         paid = flt(paid_info.get("paid_amount"))
         outstanding = max(total - paid, 0)
-        status = get_receipt_payment_status(total, paid, outstanding)
+        receipt_date = receipt.get("posting_date") or receipt.get("creation")
+        status = get_receipt_payment_status(total, paid, outstanding, receipt_date)
+        project = receipt.get("custom_project_name") or receipt.get("project") or "-"
+        supplier = receipt.get("supplier") or "-"
+        company = receipt.get("company") or receipt.get("custom_test_company_") or "-"
 
         if filters.get("payment_status") and status != filters["payment_status"]:
             continue
 
+        search_text = (filters.get("search") or "").lower()
+        if search_text:
+            haystack = " ".join([receipt.name or "", supplier, project, company]).lower()
+            if search_text not in haystack:
+                continue
+
         rows.append({
             "purchase_receipt": receipt.name,
-            "supplier": receipt.get("supplier") or "-",
-            "project": receipt.get("custom_project_name") or receipt.get("project") or "-",
-            "company": receipt.get("company") or receipt.get("custom_test_company_") or "-",
-            "receipt_date": str(receipt.get("posting_date") or ""),
+            "supplier": supplier,
+            "project": project,
+            "company": company,
+            "receipt_date": str(receipt_date or ""),
             "total_amount": total,
+            "previous_paid_amount": 0,
             "paid_amount": paid,
+            "latest_payment_amount": flt(paid_info.get("latest_payment_amount")) or paid,
             "outstanding_amount": outstanding,
             "payment_status": status,
             "last_payment_date": str(paid_info.get("payment_date") or ""),
+            "payment_entry": paid_info.get("payment_entry") or "",
+            "progress_percent": get_payment_progress_percent(total, paid),
+            "is_overdue": status == "Overdue",
         })
 
     return rows
@@ -790,12 +979,12 @@ def get_payment_dashboard_paid_amounts(receipt_names):
     if not has_field("Procureflow Payment Entry", "purchase_receipt") or not has_field("Procureflow Payment Entry", "amount"):
         return {}
 
-    date_select = "max(payment_date) as payment_date" if has_field("Procureflow Payment Entry", "payment_date") else "null as payment_date"
-    rows = frappe.db.sql(
+    date_field = "payment_date" if has_field("Procureflow Payment Entry", "payment_date") else "creation"
+    summary_rows = frappe.db.sql(
         f"""
         select purchase_receipt,
                coalesce(sum(amount), 0) as paid_amount,
-               {date_select}
+               max(`{date_field}`) as payment_date
         from `tabProcureflow Payment Entry`
         where docstatus = 1
           and purchase_receipt in %(receipt_names)s
@@ -804,10 +993,34 @@ def get_payment_dashboard_paid_amounts(receipt_names):
         {"receipt_names": tuple(receipt_names)},
         as_dict=True,
     )
-    return {row.purchase_receipt: row for row in rows}
+    paid_map = {row.purchase_receipt: row for row in summary_rows}
+
+    latest_rows = frappe.db.sql(
+        f"""
+        select name,
+               purchase_receipt,
+               amount as latest_payment_amount,
+               `{date_field}` as payment_date
+        from `tabProcureflow Payment Entry`
+        where docstatus = 1
+          and purchase_receipt in %(receipt_names)s
+        order by purchase_receipt asc, `{date_field}` desc, modified desc
+        """,
+        {"receipt_names": tuple(receipt_names)},
+        as_dict=True,
+    )
+    for row in latest_rows:
+        if row.purchase_receipt not in paid_map:
+            paid_map[row.purchase_receipt] = {}
+        if not paid_map[row.purchase_receipt].get("payment_entry"):
+            paid_map[row.purchase_receipt]["payment_entry"] = row.name
+            paid_map[row.purchase_receipt]["latest_payment_amount"] = row.latest_payment_amount
+            paid_map[row.purchase_receipt]["payment_date"] = row.payment_date
+
+    return paid_map
 
 
-def get_receipt_payment_status(total, paid, outstanding=None):
+def get_receipt_payment_status(total, paid, outstanding=None, receipt_date=None):
     total = flt(total)
     paid = flt(paid)
     outstanding = max(total - paid, 0) if outstanding is None else flt(outstanding)
@@ -816,9 +1029,18 @@ def get_receipt_payment_status(total, paid, outstanding=None):
         return "Zero"
     if outstanding <= 0:
         return "Paid"
+    if receipt_date and getdate(receipt_date) < add_days(getdate(nowdate()), -30):
+        return "Overdue"
     if paid > 0:
         return "Partial"
     return "Pending"
+
+
+def get_payment_progress_percent(total, paid):
+    total = flt(total)
+    if total <= 0:
+        return 0
+    return min(round((flt(paid) / total) * 100, 1), 100)
 
 
 def get_payment_dashboard_kpis(rows):
@@ -830,7 +1052,15 @@ def get_payment_dashboard_kpis(rows):
         "pending_receipts": summary["Pending"]["count"],
         "partial_receipts": summary["Partial"]["count"],
         "paid_receipts": summary["Paid"]["count"],
+        "overdue_receipts": summary["Overdue"]["count"],
+        "receipt_count": len(rows),
+        "paid_percent": 0,
+        "avg_payment_days": get_average_payment_days(rows),
     }
+    totals["paid_percent"] = 0 if not totals["total_receipt_amount"] else min(
+        round((totals["total_paid_amount"] / totals["total_receipt_amount"]) * 100, 1),
+        100,
+    )
     return totals
 
 
@@ -839,6 +1069,7 @@ def get_payment_status_summary(rows):
         "Paid": {"count": 0, "total_amount": 0, "paid_amount": 0, "outstanding_amount": 0},
         "Partial": {"count": 0, "total_amount": 0, "paid_amount": 0, "outstanding_amount": 0},
         "Pending": {"count": 0, "total_amount": 0, "paid_amount": 0, "outstanding_amount": 0},
+        "Overdue": {"count": 0, "total_amount": 0, "paid_amount": 0, "outstanding_amount": 0},
         "Zero": {"count": 0, "total_amount": 0, "paid_amount": 0, "outstanding_amount": 0},
     }
 
@@ -852,6 +1083,21 @@ def get_payment_status_summary(rows):
         summary[status]["outstanding_amount"] += flt(row.get("outstanding_amount"))
 
     return summary
+
+
+def get_average_payment_days(rows):
+    day_counts = []
+    for row in rows:
+        if not row.get("receipt_date") or not row.get("last_payment_date"):
+            continue
+        try:
+            receipt_date = getdate(row.get("receipt_date"))
+            payment_date = getdate(row.get("last_payment_date"))
+            if payment_date >= receipt_date:
+                day_counts.append((payment_date - receipt_date).days)
+        except Exception:
+            continue
+    return 0 if not day_counts else round(sum(day_counts) / len(day_counts), 1)
 
 
 def get_payment_group_summary(rows, group_field, limit=10):
