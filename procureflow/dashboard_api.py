@@ -602,3 +602,292 @@ def get_filter_options():
         projects = [row.name for row in get_list_safe(project_doctype, fields=["name"], order_by="name asc", limit_page_length=200)]
 
     return {"companies": companies, "projects": projects}
+
+
+@frappe.whitelist()
+def ensure_payment_tracking_dashboard_page():
+    page_name = "payment-tracking-dashboard"
+    truncated_page_name = page_name[:20]
+    values = {
+        "doctype": "Page",
+        "name": page_name,
+        "page_name": page_name,
+        "title": "Payment Tracking Dashboard",
+        "module": "Procure Flow",
+        "standard": "Yes",
+        "system_page": 0,
+    }
+
+    action = "updated"
+    if not frappe.db.exists("Page", page_name) and frappe.db.exists("Page", truncated_page_name):
+        frappe.rename_doc("Page", truncated_page_name, page_name, force=True, show_alert=False)
+        action = "renamed"
+
+    if frappe.db.exists("Page", page_name):
+        frappe.db.set_value("Page", page_name, {
+            "title": values["title"],
+            "page_name": values["page_name"],
+            "module": values["module"],
+            "standard": values["standard"],
+            "system_page": values["system_page"],
+        })
+    else:
+        doc = frappe.get_doc(values)
+        doc.flags.do_not_update_json = True
+        doc.insert(ignore_permissions=True)
+        if doc.name != page_name:
+            frappe.rename_doc("Page", doc.name, page_name, force=True, show_alert=False)
+        action = "created"
+
+    frappe.db.commit()
+    return {"page": page_name, "action": action}
+
+
+@frappe.whitelist()
+def get_payment_tracking_dashboard_data(
+    company=None,
+    project=None,
+    supplier=None,
+    payment_status=None,
+    month=None,
+    from_date=None,
+    to_date=None,
+    limit=50,
+):
+    filters = get_payment_dashboard_filters(
+        company=company,
+        project=project,
+        supplier=supplier,
+        payment_status=payment_status,
+        month=month,
+        from_date=from_date,
+        to_date=to_date,
+        limit=limit,
+    )
+    rows = get_payment_dashboard_receipts(filters, limit=5000)
+
+    return {
+        "filters": filters,
+        "filter_options": get_payment_filter_options(),
+        "kpis": get_payment_dashboard_kpis(rows),
+        "status_summary": get_payment_status_summary(rows),
+        "outstanding_by_supplier": get_payment_group_summary(rows, "supplier", limit=10),
+        "outstanding_by_project": get_payment_group_summary(rows, "project", limit=10),
+        "recent_receipts": rows[:filters["limit"]],
+        "insights": get_payment_dashboard_insights(rows),
+    }
+
+
+def get_payment_dashboard_filters(
+    company=None,
+    project=None,
+    supplier=None,
+    payment_status=None,
+    month=None,
+    from_date=None,
+    to_date=None,
+    limit=50,
+):
+    filters = get_dashboard_filters(company=company, project=project, month=month, from_date=from_date, to_date=to_date)
+    status = (payment_status or "").strip()
+    if status not in ("Paid", "Partial", "Pending", "Zero"):
+        status = ""
+
+    try:
+        limit = min(max(int(limit or 50), 1), 100)
+    except Exception:
+        limit = 50
+
+    filters.update({
+        "supplier": supplier or "",
+        "payment_status": status,
+        "limit": limit,
+    })
+    return filters
+
+
+def get_payment_filter_options():
+    options = get_filter_options()
+    suppliers = []
+    if doctype_exists("Supplier"):
+        suppliers = [row.name for row in get_list_safe("Supplier", fields=["name"], order_by="name asc", limit_page_length=300)]
+
+    if not options.get("companies") and doctype_exists("Company Master"):
+        options["companies"] = [
+            row.name for row in get_list_safe("Company Master", fields=["name"], order_by="name asc", limit_page_length=100)
+        ]
+
+    options.update({
+        "suppliers": suppliers,
+        "payment_statuses": ["Paid", "Partial", "Pending", "Zero"],
+    })
+    return options
+
+
+def get_payment_dashboard_receipts(filters, limit=5000):
+    if not doctype_exists("Purchase Receipt"):
+        return []
+
+    pr_fields = ["name", "supplier", "docstatus", "modified"]
+    for fieldname in (
+        "posting_date",
+        "due_date",
+        "company",
+        "custom_test_company_",
+        "project",
+        "custom_project_name",
+        "rounded_total",
+        "grand_total",
+        "base_grand_total",
+    ):
+        if has_field("Purchase Receipt", fieldname):
+            pr_fields.append(fieldname)
+
+    pr_filters = build_filters("Purchase Receipt", filters)
+    if filters.get("supplier") and has_field("Purchase Receipt", "supplier"):
+        pr_filters["supplier"] = filters["supplier"]
+
+    receipts = get_list_safe(
+        "Purchase Receipt",
+        filters=pr_filters,
+        fields=pr_fields,
+        order_by="posting_date desc, modified desc" if has_field("Purchase Receipt", "posting_date") else "modified desc",
+        limit_page_length=limit,
+    )
+
+    paid_map = get_payment_dashboard_paid_amounts([row.name for row in receipts])
+    rows = []
+
+    for receipt in receipts:
+        total = get_purchase_receipt_total(receipt)
+        paid_info = paid_map.get(receipt.name, {})
+        paid = flt(paid_info.get("paid_amount"))
+        outstanding = max(total - paid, 0)
+        status = get_receipt_payment_status(total, paid, outstanding)
+
+        if filters.get("payment_status") and status != filters["payment_status"]:
+            continue
+
+        rows.append({
+            "purchase_receipt": receipt.name,
+            "supplier": receipt.get("supplier") or "-",
+            "project": receipt.get("custom_project_name") or receipt.get("project") or "-",
+            "company": receipt.get("company") or receipt.get("custom_test_company_") or "-",
+            "receipt_date": str(receipt.get("posting_date") or ""),
+            "total_amount": total,
+            "paid_amount": paid,
+            "outstanding_amount": outstanding,
+            "payment_status": status,
+            "last_payment_date": str(paid_info.get("payment_date") or ""),
+        })
+
+    return rows
+
+
+def get_payment_dashboard_paid_amounts(receipt_names):
+    if not receipt_names or not doctype_exists("Procureflow Payment Entry"):
+        return {}
+    if not has_field("Procureflow Payment Entry", "purchase_receipt") or not has_field("Procureflow Payment Entry", "amount"):
+        return {}
+
+    date_select = "max(payment_date) as payment_date" if has_field("Procureflow Payment Entry", "payment_date") else "null as payment_date"
+    rows = frappe.db.sql(
+        f"""
+        select purchase_receipt,
+               coalesce(sum(amount), 0) as paid_amount,
+               {date_select}
+        from `tabProcureflow Payment Entry`
+        where docstatus = 1
+          and purchase_receipt in %(receipt_names)s
+        group by purchase_receipt
+        """,
+        {"receipt_names": tuple(receipt_names)},
+        as_dict=True,
+    )
+    return {row.purchase_receipt: row for row in rows}
+
+
+def get_receipt_payment_status(total, paid, outstanding=None):
+    total = flt(total)
+    paid = flt(paid)
+    outstanding = max(total - paid, 0) if outstanding is None else flt(outstanding)
+
+    if total <= 0:
+        return "Zero"
+    if outstanding <= 0:
+        return "Paid"
+    if paid > 0:
+        return "Partial"
+    return "Pending"
+
+
+def get_payment_dashboard_kpis(rows):
+    summary = get_payment_status_summary(rows)
+    totals = {
+        "total_receipt_amount": sum(flt(row.get("total_amount")) for row in rows),
+        "total_paid_amount": sum(flt(row.get("paid_amount")) for row in rows),
+        "total_outstanding_amount": sum(flt(row.get("outstanding_amount")) for row in rows),
+        "pending_receipts": summary["Pending"]["count"],
+        "partial_receipts": summary["Partial"]["count"],
+        "paid_receipts": summary["Paid"]["count"],
+    }
+    return totals
+
+
+def get_payment_status_summary(rows):
+    summary = {
+        "Paid": {"count": 0, "total_amount": 0, "paid_amount": 0, "outstanding_amount": 0},
+        "Partial": {"count": 0, "total_amount": 0, "paid_amount": 0, "outstanding_amount": 0},
+        "Pending": {"count": 0, "total_amount": 0, "paid_amount": 0, "outstanding_amount": 0},
+        "Zero": {"count": 0, "total_amount": 0, "paid_amount": 0, "outstanding_amount": 0},
+    }
+
+    for row in rows:
+        status = row.get("payment_status") or "Zero"
+        if status not in summary:
+            status = "Zero"
+        summary[status]["count"] += 1
+        summary[status]["total_amount"] += flt(row.get("total_amount"))
+        summary[status]["paid_amount"] += flt(row.get("paid_amount"))
+        summary[status]["outstanding_amount"] += flt(row.get("outstanding_amount"))
+
+    return summary
+
+
+def get_payment_group_summary(rows, group_field, limit=10):
+    grouped = defaultdict(lambda: {
+        "label": "Not Set",
+        "receipt_count": 0,
+        "total_amount": 0,
+        "paid_amount": 0,
+        "outstanding_amount": 0,
+    })
+
+    for row in rows:
+        label = row.get(group_field) or "Not Set"
+        if label == "-":
+            label = "Not Set"
+        grouped[label]["label"] = label
+        grouped[label]["receipt_count"] += 1
+        grouped[label]["total_amount"] += flt(row.get("total_amount"))
+        grouped[label]["paid_amount"] += flt(row.get("paid_amount"))
+        grouped[label]["outstanding_amount"] += flt(row.get("outstanding_amount"))
+
+    return sorted(grouped.values(), key=lambda item: item["outstanding_amount"], reverse=True)[:limit]
+
+
+def get_payment_dashboard_insights(rows):
+    supplier_rows = get_payment_group_summary(rows, "supplier", limit=1)
+    project_rows = get_payment_group_summary(rows, "project", limit=1)
+    pending_rows = [row for row in rows if flt(row.get("outstanding_amount")) > 0 and row.get("receipt_date")]
+    pending_rows.sort(key=lambda row: row.get("receipt_date") or "")
+
+    total = sum(flt(row.get("total_amount")) for row in rows)
+    paid = sum(flt(row.get("paid_amount")) for row in rows)
+
+    return {
+        "highest_outstanding_supplier": supplier_rows[0] if supplier_rows else {},
+        "highest_outstanding_project": project_rows[0] if project_rows else {},
+        "oldest_pending_receipt": pending_rows[0] if pending_rows else {},
+        "completion_percent": 0 if not total else min(round((paid / total) * 100, 1), 100),
+    }

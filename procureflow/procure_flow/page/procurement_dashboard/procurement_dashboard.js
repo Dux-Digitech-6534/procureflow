@@ -64,35 +64,9 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 	make() {
 		$(this.page.main).empty().append(`
 			<div class="pf-dashboard">
-				<aside class="pf-sidebar">
-					<div class="pf-brand">
-						<div class="pf-brand-row">
-							<div class="pf-brand-icon"><i class="ti ti-building-skyscraper"></i></div>
-							<div>
-								<div class="pf-brand-name">ProcureFlow</div>
-								<div class="pf-brand-sub">Real Estate ERP</div>
-							</div>
-						</div>
-					</div>
-					<div class="pf-nav-label">Main</div>
-					${this.nav_item("Dashboard", "layout-dashboard", "", true)}
-					${this.nav_item("Material Request", "file-text", "Material Request", false, "mr_pending")}
-					${this.nav_item("Supplier Quotation", "file-invoice", "Supplier Quotation")}
-					${this.nav_item("Purchase Order", "shopping-cart", "Purchase Order")}
-					${this.nav_item("Purchase Receipt", "truck-delivery", "Purchase Receipt")}
-					${this.nav_item("Payment Tracking", "coin-rupee", "Procureflow Payment Entry")}
-					<div class="pf-nav-label pf-nav-label-spaced">Master</div>
-					${this.nav_item("Suppliers", "users", "Supplier")}
-					${this.nav_item("Projects", "building", "Project Master")}
-					${this.nav_item("Warehouses", "archive", "Warehouse")}
-					<div class="pf-sidebar-footer">
-						${this.nav_item("Reports", "chart-bar", "", false, "", "query-report")}
-						${this.nav_item("Settings", "settings", "", false, "", "Module/Procure Flow")}
-					</div>
-				</aside>
 				<main class="pf-main">
 					<header class="pf-topbar">
-						<div>
+						<div class="pf-header-copy">
 							<div class="pf-title">Procurement Dashboard</div>
 							<div class="pf-subtitle" data-role="subtitle">Live overview</div>
 						</div>
@@ -126,8 +100,6 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 						<div class="pf-overview" data-role="overview"></div>
 						${this.section_header("Operations")}
 						<div class="pf-op-grid" data-role="operations"></div>
-						${this.section_header("Payment Tracking")}
-						<div data-role="payments"></div>
 						${this.section_header("Analytics")}
 						<div class="pf-insight-grid" data-role="analytics"></div>
 					</section>
@@ -200,7 +172,6 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 		this.render_kpis();
 		this.render_overview();
 		this.render_operations();
-		this.render_payments();
 		this.render_analytics();
 	}
 
@@ -383,42 +354,6 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 				<table class="pf-sup-table">${body}</table>
 			</div>
 		`;
-	}
-
-	render_payments() {
-		const rows = this.data.payment_tracking || [];
-		$(this.page.main).find("[data-role='payments']").html(`
-			<div class="pf-card pf-wide-card">
-				<div class="pf-card-header">
-					<div class="pf-card-title"><i class="ti ti-credit-card-pay"></i>Purchase Receipt Payments</div>
-					<span class="pf-muted">Submitted Procureflow Payment Entry amounts</span>
-				</div>
-				<table class="pf-data-table">
-					<thead>
-						<tr>
-							<th>Purchase Receipt</th><th>Supplier</th><th>Total Amount</th><th>Paid Amount</th>
-							<th>Outstanding</th><th>Status</th><th>Payment Date</th>
-						</tr>
-					</thead>
-					<tbody>
-						${rows.length ? rows.map((row) => `
-							<tr>
-								<td>${this.mono(row.purchase_receipt)}</td>
-								<td>${frappe.utils.escape_html(row.supplier || "-")}</td>
-								<td>${this.money(row.total_amount)}</td>
-								<td>${this.money(row.paid_amount)}</td>
-								<td>
-									${this.money(row.outstanding_amount)}
-									<div class="pf-prog-bar"><div class="pf-prog-fill ${row.payment_status === "Paid" ? "paid" : "partial"}" style="width:${this.payment_percent(row)}%"></div></div>
-								</td>
-								<td>${this.badge(row.payment_status, this.payment_tone(row.payment_status, row.is_overdue))}</td>
-								<td>${frappe.utils.escape_html(row.payment_date || "-")}</td>
-							</tr>
-						`).join("") : `<tr><td colspan="7">${this.empty_state("No payment tracking records found")}</td></tr>`}
-					</tbody>
-				</table>
-			</div>
-		`);
 	}
 
 	render_analytics() {

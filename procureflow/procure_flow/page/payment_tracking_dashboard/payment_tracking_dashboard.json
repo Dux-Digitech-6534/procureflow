@@ -5,13 +5,13 @@
  "idx": 0,
  "modified_by": "Administrator",
  "module": "Procure Flow",
- "name": "procurement-dashboard",
+ "name": "payment-tracking-dashboard",
  "owner": "Administrator",
- "page_name": "procurement-dashboard",
+ "page_name": "payment-tracking-dashboard",
  "roles": [],
  "script": null,
  "standard": "Yes",
  "style": null,
  "system_page": 0,
- "title": "Procurement Dashboard"
+ "title": "Payment Tracking Dashboard"
 }
