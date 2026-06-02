@@ -80,10 +80,14 @@ def get_dashboard_filters(company=None, project=None, month=None, from_date=None
         from_date = from_date or month_start
         to_date = to_date or get_last_day(month_start)
 
-    if not from_date or not to_date:
+    if not from_date and not to_date:
+        current = getdate(nowdate())
+        from_date = get_first_day(add_months(current, -5))
+        to_date = current
+    elif not from_date or not to_date:
         current = getdate(nowdate())
         from_date = from_date or get_first_day(current)
-        to_date = to_date or get_last_day(current)
+        to_date = to_date or current
 
     return {
         "company": company or "",
@@ -462,16 +466,28 @@ def get_paid_amounts(receipt_names):
     if not has_field("Procureflow Payment Entry", "purchase_receipt") or not has_field("Procureflow Payment Entry", "amount"):
         return {}
 
-    fields = ["purchase_receipt", "sum(amount) as paid_amount"]
+    date_select = "null as payment_date"
     if has_field("Procureflow Payment Entry", "payment_date"):
-        fields.append("max(payment_date) as payment_date")
+        date_select = "max(`payment_date`) as payment_date"
 
-    rows = get_all_safe(
-        "Procureflow Payment Entry",
-        filters={"purchase_receipt": ["in", receipt_names], "docstatus": 1},
-        fields=fields,
-        group_by="purchase_receipt",
-    )
+    try:
+        rows = frappe.db.sql(
+            f"""
+            select purchase_receipt,
+                   coalesce(sum(amount), 0) as paid_amount,
+                   {date_select}
+            from `tabProcureflow Payment Entry`
+            where purchase_receipt in %(receipt_names)s
+              and docstatus = 1
+            group by purchase_receipt
+            """,
+            {"receipt_names": tuple(receipt_names)},
+            as_dict=True,
+        )
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "ProcureFlow dashboard paid amount query failed")
+        return {}
+
     return {row.purchase_receipt: row for row in rows}
 
 
@@ -500,7 +516,7 @@ def get_overview(filters):
         value = get_sum("Purchase Order", po_amount_field, month_filters)
         max_value = max(max_value, value)
         months.append({
-            "label": calendar.month_abbr[month_start.month],
+            "label": f"{calendar.month_abbr[month_start.month]} - {month_start.year}",
             "month": str(month_start)[:7],
             "value": value,
             "is_current": month_start == end_month,

@@ -65,8 +65,8 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 	get_current_date_range() {
 		const today = new Date();
 		return {
-			from_date: this.format_input_date(new Date(today.getFullYear(), today.getMonth(), 1)),
-			to_date: this.format_input_date(new Date(today.getFullYear(), today.getMonth() + 1, 0)),
+			from_date: this.format_input_date(new Date(today.getFullYear(), today.getMonth() - 5, 1)),
+			to_date: this.format_input_date(today),
 		};
 	}
 
@@ -449,7 +449,6 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 		const approval = analytics.avg_po_approval_time || {};
 		const outstanding = analytics.outstanding_over_30_days || {};
 		const periodSpend = analytics.total_period_spend || {};
-		const supplierShare = analytics.top_supplier_share || {};
 		const cards = [
 			this.metric_card("MR to PO conversion", "arrows-exchange", "blue", `${this.number(conversion.value, 1)}%`, [
 				["Converted", this.number(conversion.converted, 0)],
@@ -464,10 +463,6 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 			]),
 			this.metric_card("Total Period Spend", "coin-rupee", "purple", this.money(periodSpend.value), [
 				["Based on", "Purchase Orders"],
-			]),
-			this.metric_card("Top Supplier Share", "chart-pie", "teal", `${this.number(supplierShare.value, 1)}%`, [
-				["Supplier", supplierShare.supplier || "-"],
-				["PO Value", this.money(supplierShare.total)],
 			]),
 		];
 		$(this.page.main).find("[data-role='analytics']").html(cards.join(""));

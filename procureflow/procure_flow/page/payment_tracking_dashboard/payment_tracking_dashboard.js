@@ -56,8 +56,8 @@ procureflow.payment_dashboard.PaymentTrackingDashboard = class PaymentTrackingDa
 	current_month_range() {
 		const today = new Date();
 		return {
-			from_date: this.input_date(new Date(today.getFullYear(), today.getMonth(), 1)),
-			to_date: this.input_date(new Date(today.getFullYear(), today.getMonth() + 1, 0)),
+			from_date: this.input_date(new Date(today.getFullYear(), today.getMonth() - 5, 1)),
+			to_date: this.input_date(today),
 		};
 	}
 
