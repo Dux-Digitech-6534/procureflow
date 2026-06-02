@@ -17,7 +17,7 @@ PROJECT_FIELDS = {
     "Material Request": ("custom_project_name", "custom_select_project_", "project"),
     "Supplier Quotation": ("custom_project_name", "project"),
     "Purchase Order": ("custom_project_name", "project"),
-    "Purchase Receipt": ("custom_project_name", "project"),
+    "Purchase Receipt": ("custom_project_name", "custom_select_project_", "project"),
 }
 
 COMPANY_FIELDS = {
@@ -579,6 +579,36 @@ def get_recent(doctype, filters, field_map, limit=5):
     return result
 
 
+def get_recent_purchase_receipts(filters, limit=6):
+    if not doctype_exists("Purchase Receipt"):
+        return []
+
+    project_field = first_existing_field("Purchase Receipt", PROJECT_FIELDS["Purchase Receipt"])
+    date_field = get_dashboard_date_field("Purchase Receipt")
+    fields = ["name", "docstatus"]
+    for fieldname in ("supplier", project_field, "status", "workflow_state", date_field):
+        if fieldname and fieldname not in fields and has_field("Purchase Receipt", fieldname):
+            fields.append(fieldname)
+
+    rows = get_all_safe(
+        "Purchase Receipt",
+        filters=build_filters("Purchase Receipt", filters, date_field=date_field),
+        fields=fields,
+        order_by=f"{date_field} desc, modified desc" if date_field else "modified desc",
+        limit_page_length=limit,
+    )
+
+    result = []
+    for row in rows:
+        result.append({
+            "name": row.name,
+            "supplier": row.get("supplier") if has_field("Purchase Receipt", "supplier") else None,
+            "project": row.get(project_field) if project_field else None,
+            "status": normalize_status(row),
+        })
+    return result
+
+
 def get_operations(filters):
     po_amount_field = get_amount_field("Purchase Order")
     return {
@@ -598,14 +628,7 @@ def get_operations(filters):
                 "value": po_amount_field,
             },
         ),
-        "purchase_receipts": get_recent(
-            "Purchase Receipt",
-            filters,
-            {
-                "supplier": "supplier" if has_field("Purchase Receipt", "supplier") else None,
-                "project": first_existing_field("Purchase Receipt", PROJECT_FIELDS["Purchase Receipt"]),
-            },
-        ),
+        "purchase_receipts": get_recent_purchase_receipts(filters),
         "top_suppliers": get_top_suppliers(filters),
     }
 
