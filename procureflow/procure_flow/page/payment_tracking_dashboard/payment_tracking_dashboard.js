@@ -126,11 +126,6 @@ procureflow.payment_dashboard.PaymentTrackingDashboard = class PaymentTrackingDa
 						</div>
 						<div data-role="ledger"></div>
 					</div>
-					${this.section_header("Purchase Receipt Overview")}
-					<div class="ptd-overview-grid">
-						<div data-role="receipt-overview"></div>
-						<div data-role="status-summary"></div>
-					</div>
 				</section>
 			</div>
 		`);
@@ -207,8 +202,6 @@ procureflow.payment_dashboard.PaymentTrackingDashboard = class PaymentTrackingDa
 		this.render_kpis();
 		this.render_status_chips();
 		this.render_ledger();
-		this.render_receipt_overview();
-		this.render_status_summary();
 	}
 
 	render_filters() {

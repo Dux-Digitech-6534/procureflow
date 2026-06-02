@@ -248,14 +248,14 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 				["red", `${mr.rejected || 0} Rejected`, "x"],
 			])}
 			${this.kpi_card("Purchase Orders", "shopping-cart", "teal", po.total, [
-				["green", `${po.approved || 0} Approved`, "check"],
+				["green", `${po.approved || 0} Place Order`, "check"],
 				["amber", `${po.pending || 0} Pending`, "hourglass"],
 				["red", `${po.rejected || 0} Rejected`, "x"],
 			])}
 			${this.kpi_card("Purchase Receipts", "truck-delivery", "purple", pr.total, [
-				["teal", `${pr.completed || 0} Completed`, "check"],
+				["teal", `${pr.completed || 0} Fully Material Received`, "check"],
+				["blue", `${pr.partial || 0} Partially Received`, "progress-check"],
 				["amber", `${pr.pending || 0} Pending`, "hourglass"],
-				["gray", `${pr.overdue || 0} Overdue`, "clock-exclamation"],
 			])}
 			${this.kpi_card("Total PO Value", "coin-rupee", "amber", this.money(po_value.total), [
 				["blue", `Period ${this.money(po_value.current_month)}`, ""],
@@ -286,29 +286,14 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 
 	outstanding_kpi_card(outstanding, breakdown) {
 		const total = breakdown.total_outstanding != null ? breakdown.total_outstanding : outstanding.total;
-		const pending = breakdown.pending_outstanding != null ? breakdown.pending_outstanding : outstanding.pending;
-		const partial = breakdown.partial_outstanding != null ? breakdown.partial_outstanding : outstanding.partial;
-		const over_30 = breakdown.over_30_days_outstanding != null ? breakdown.over_30_days_outstanding : outstanding.over_30_days || outstanding.overdue;
-		const top_supplier = breakdown.top_supplier || "-";
-		const top_project = breakdown.top_project || "-";
 
 		return `
-			<div class="pf-kpi-card c-red pf-kpi-clickable pf-outstanding-kpi" data-action="open-payment-dashboard" title="${__("Open Payment Tracking Dashboard")}">
+			<div class="pf-kpi-card c-red">
 				<div class="pf-kpi-top">
 					<span class="pf-kpi-label">Outstanding Amount</span>
 					<div class="pf-kpi-icon"><i class="ti ti-alert-circle"></i></div>
 				</div>
 				<div class="pf-kpi-value sm">${this.money(total)}</div>
-				<div class="pf-outstanding-grid">
-					${this.outstanding_item("Pending", pending)}
-					${this.outstanding_item("Partial", partial)}
-					${this.outstanding_item("> 30 days", over_30)}
-					${this.outstanding_item("Top Supplier", `${top_supplier} - ${this.money_short(breakdown.top_supplier_outstanding)}`, true)}
-					${this.outstanding_item("Top Project", `${top_project} - ${this.money_short(breakdown.top_project_outstanding)}`, true)}
-				</div>
-				<button class="pf-detail-link" type="button">
-					<span>View Details</span><i class="ti ti-arrow-up-right"></i>
-				</button>
 			</div>
 		`;
 	}
@@ -370,8 +355,16 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 					this.mono(row.name),
 					frappe.utils.escape_html(row.supplier || "-"),
 					this.money(row.value),
-					this.badge(row.status, this.status_tone(row.status)),
+					this.badge(this.purchase_order_status_label(row.status), this.status_tone(row.status)),
 				], "Open Purchase Order")
+			))}
+			${this.table_card("Material Received", "truck-delivery", ["Receipt No.", "Supplier", "Project", "Status"], (ops.purchase_receipts || []).map((row) =>
+				this.clickable_table_row("Purchase Receipt", row.name, [
+					this.mono(row.name),
+					frappe.utils.escape_html(row.supplier || "-"),
+					frappe.utils.escape_html(row.project || "-"),
+					this.badge(row.status, this.status_tone(row.status)),
+				], "Open Purchase Receipt")
 			))}
 			${this.top_suppliers(ops.top_suppliers || [])}
 		`);
@@ -448,7 +441,6 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 		const conversion = analytics.mr_to_po_conversion || {};
 		const approval = analytics.avg_po_approval_time || {};
 		const outstanding = analytics.outstanding_over_30_days || {};
-		const periodSpend = analytics.total_period_spend || {};
 		const cards = [
 			this.metric_card("MR to PO conversion", "arrows-exchange", "blue", `${this.number(conversion.value, 1)}%`, [
 				["Converted", this.number(conversion.converted, 0)],
@@ -460,9 +452,6 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 			]),
 			this.metric_card("Outstanding > 30 days", "alert-triangle", "amber", this.money(outstanding.value), [
 				["Receipts", this.number(outstanding.count, 0)],
-			]),
-			this.metric_card("Total Period Spend", "coin-rupee", "purple", this.money(periodSpend.value), [
-				["Based on", "Purchase Orders"],
 			]),
 		];
 		$(this.page.main).find("[data-role='analytics']").html(cards.join(""));
@@ -539,6 +528,10 @@ procureflow.dashboard.ProcurementDashboard = class ProcurementDashboard {
 
 	badge(value, tone) {
 		return `<span class="pf-badge b-${tone}">${frappe.utils.escape_html(value || "-")}</span>`;
+	}
+
+	purchase_order_status_label(value) {
+		return String(value || "") === "Approved" ? "Place Order" : value;
 	}
 
 	status_tone(value) {

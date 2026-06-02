@@ -775,8 +775,8 @@
 
 .pf-op-grid {
 	display: grid;
-	grid-template-columns: repeat(3, minmax(260px, 1fr));
-	gap: 18px;
+	grid-template-columns: repeat(4, minmax(220px, 1fr));
+	gap: 16px;
 	margin-bottom: 26px;
 }
 
@@ -940,7 +940,7 @@
 
 .pf-insight-grid {
 	display: grid;
-	grid-template-columns: repeat(5, minmax(190px, 1fr));
+	grid-template-columns: repeat(3, minmax(220px, 1fr));
 	gap: 18px;
 }
 

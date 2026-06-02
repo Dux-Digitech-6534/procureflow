@@ -314,24 +314,29 @@ def get_purchase_receipt_counts(filters):
     fields = ["name", "docstatus"]
     if has_field("Purchase Receipt", "status"):
         fields.append("status")
+    if has_field("Purchase Receipt", "per_received"):
+        fields.append("per_received")
     if has_field("Purchase Receipt", "posting_date"):
         fields.append("posting_date")
     if has_field("Purchase Receipt", "due_date"):
         fields.append("due_date")
 
     rows = get_list_safe("Purchase Receipt", filters=base_filters, fields=fields, limit_page_length=10000)
-    today = getdate(nowdate())
-    counts = {"total": get_count("Purchase Receipt", base_filters), "completed": 0, "pending": 0, "overdue": 0}
+    counts = {"total": get_count("Purchase Receipt", base_filters), "completed": 0, "partial": 0, "pending": 0, "overdue": 0}
 
     for row in rows:
         status = normalize_status(row).lower()
-        if row.get("docstatus") == 1 or "complete" in status or "closed" in status:
+        per_received = flt(row.get("per_received")) if row.get("per_received") is not None else None
+        if per_received is not None and per_received >= 100:
+            counts["completed"] += 1
+        elif per_received is not None and per_received > 0:
+            counts["partial"] += 1
+        elif "partial" in status:
+            counts["partial"] += 1
+        elif row.get("docstatus") == 1 or "complete" in status or "closed" in status:
             counts["completed"] += 1
         else:
             counts["pending"] += 1
-        due_date = row.get("due_date") or row.get("posting_date")
-        if due_date and getdate(due_date) < add_days(today, -30) and row.get("docstatus") != 1:
-            counts["overdue"] += 1
 
     if counts["total"] and counts["total"] > len(rows):
         counts["pending"] += counts["total"] - len(rows)
@@ -591,6 +596,14 @@ def get_operations(filters):
             {
                 "supplier": "supplier" if has_field("Purchase Order", "supplier") else None,
                 "value": po_amount_field,
+            },
+        ),
+        "purchase_receipts": get_recent(
+            "Purchase Receipt",
+            filters,
+            {
+                "supplier": "supplier" if has_field("Purchase Receipt", "supplier") else None,
+                "project": first_existing_field("Purchase Receipt", PROJECT_FIELDS["Purchase Receipt"]),
             },
         ),
         "top_suppliers": get_top_suppliers(filters),
