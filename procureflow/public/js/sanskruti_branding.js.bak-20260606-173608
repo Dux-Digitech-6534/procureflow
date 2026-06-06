@@ -5,8 +5,6 @@
   var SUBTITLE = "Smart ERP Solutions";
   var LOGO = "/assets/procureflow/img/sanskruti-group-asia-logo.png";
   var FAVICON = "/assets/procureflow/img/sanskruti-group-asia-favicon.png";
-  var DUX_LOGO = "/assets/procureflow/img/dux-digitech-logo.jpg";
-  var DUX_POWERED_BY = "Powered by DUX Digitech";
 
   function ready(fn) {
     if (document.readyState === "loading") {
@@ -65,16 +63,6 @@
         '<div class="sga-login-brand-subtitle">' + SUBTITLE + "</div>"
       ].join("");
       card.insertBefore(brand, card.firstChild);
-    }
-
-    if (!card.querySelector(".dux-login-footer")) {
-      var footer = document.createElement("div");
-      footer.className = "dux-login-footer";
-      footer.innerHTML = [
-        '<img src="' + DUX_LOGO + '" alt="DUX Digitech logo" loading="lazy">',
-        '<div class="dux-login-powered">' + DUX_POWERED_BY + "</div>"
-      ].join("");
-      card.appendChild(footer);
     }
   }
 
