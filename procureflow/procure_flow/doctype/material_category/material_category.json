@@ -1,5 +1,6 @@
 {
  "actions": [],
+ "allow_import": 1,
  "allow_rename": 1,
  "autoname": "field:category_name",
  "creation": "2026-04-12 18:24:43.868340",
@@ -19,7 +20,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-04-12 18:25:46.997518",
+ "modified": "2026-06-07 12:28:46.117090",
  "modified_by": "Administrator",
  "module": "Procure Flow",
  "name": "Material Category",
