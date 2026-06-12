@@ -139,7 +139,13 @@ async function set_sq_data(frm, sq_name) {
 
         // Category
         if (sq.custom_category) {
-            frm.set_value("custom_category", sq.custom_category);
+            await frm.set_value("custom_category", sq.custom_category);
+
+            // null/"" normalize karke hi set karo, warna purane docs dirty ho jate hain
+            let sq_sub = sq.custom_sub_category || "";
+            if ((frm.doc.custom_sub_category || "") !== sq_sub) {
+                await frm.set_value("custom_sub_category", sq_sub);
+            }
         }
 
         // Warehouse
@@ -192,6 +198,12 @@ async function set_mr_data(frm) {
 
         if (mr.custom_category) {
             await frm.set_value("custom_category", mr.custom_category);
+
+            // null/"" normalize karke hi set karo, warna purane docs dirty ho jate hain
+            let mr_sub = mr.custom_sub_category || "";
+            if ((frm.doc.custom_sub_category || "") !== mr_sub) {
+                await frm.set_value("custom_sub_category", mr_sub);
+            }
         }
 
         await set_priority_from_material_requests(frm);
@@ -389,25 +401,9 @@ function map_specification(frm) {
 
 // =====================================================
 // Category Filter for Purchase Order Item
-// Filters Item by frm.doc.custom_category
+// NOTE: apply_category_filter is defined ONCE below
+// (duplicate shadowed definition removed)
 // =====================================================
-
-function apply_category_filter(frm) {
-    frm.set_query("item_code", "items", function (doc, cdt, cdn) {
-        if (frm.doc.custom_category) {
-            return {
-                query: "erpnext.controllers.queries.item_query",
-                filters: {
-                    custom_category: frm.doc.custom_category
-                }
-            };
-        }
-
-        return {};
-    });
-
-    console.log("PO Item Category Filter Applied");
-}
 
 
 // =====================================================
@@ -760,6 +756,26 @@ function clear_purchase_order_items(frm) {
 // Category ke bina item list empty rahegi
 // =====================================================
 
+// Shared filter: category + sub category
+// Sub category blank ho to sirf wahi items jo bina sub category ke hain
+// NOTE: shared global scope — same function material_request.js,
+// supplier_quotation.js, purchase_order.js teeno me hai, teeno copies
+// hamesha IDENTICAL rakho
+function get_item_category_filters(frm) {
+
+    let filters = {
+        "custom_category": frm.doc.custom_category
+    };
+
+    if (frm.doc.custom_sub_category) {
+        filters["custom_sub_category"] = frm.doc.custom_sub_category;
+    } else {
+        filters["custom_sub_category"] = ["is", "not set"];
+    }
+
+    return filters;
+}
+
 function apply_category_filter(frm) {
     frm.set_query("item_code", "items", function (doc, cdt, cdn) {
         if (!frm.doc.custom_category) {
@@ -772,8 +788,15 @@ function apply_category_filter(frm) {
 
         return {
             query: "erpnext.controllers.queries.item_query",
+            filters: get_item_category_filters(frm)
+        };
+    });
+
+    // Sub Category dropdown me sirf selected category ki sub categories aaye
+    frm.set_query("custom_sub_category", function () {
+        return {
             filters: {
-                custom_category: frm.doc.custom_category
+                material_category: frm.doc.custom_category || ''
             }
         };
     });
@@ -787,6 +810,15 @@ function apply_category_filter(frm) {
 
 frappe.ui.form.on("Purchase Order", {
     custom_category: function (frm) {
+        // Category change par purani sub category hata do
+        if (frm.doc.custom_sub_category) {
+            frm.set_value("custom_sub_category", "");
+        }
+        reset_items_on_category_change(frm);
+    },
+
+    custom_sub_category: function (frm) {
+        apply_category_filter(frm);
         reset_items_on_category_change(frm);
     }
 });

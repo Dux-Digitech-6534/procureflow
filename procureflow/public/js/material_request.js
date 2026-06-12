@@ -120,9 +120,7 @@ function open_item_popup(frm) {
 
                 get_query: function () {
                     return {
-                        filters: {
-                            custom_category: frm.doc.custom_category
-                        }
+                        filters: get_item_category_filters(frm)
                     };
                 },
 
@@ -252,7 +250,27 @@ frappe.ui.form.on('Material Request', {
 
 
 
-// remove add row button and reset child table if category change 
+// remove add row button and reset child table if category change
+
+// Shared filter: category + sub category
+// Sub category blank ho to sirf wahi items jo bina sub category ke hain
+// NOTE: shared global scope — same function material_request.js,
+// supplier_quotation.js, purchase_order.js teeno me hai, teeno copies
+// hamesha IDENTICAL rakho
+function get_item_category_filters(frm) {
+
+    let filters = {
+        "custom_category": frm.doc.custom_category
+    };
+
+    if (frm.doc.custom_sub_category) {
+        filters["custom_sub_category"] = frm.doc.custom_sub_category;
+    } else {
+        filters["custom_sub_category"] = ["is", "not set"];
+    }
+
+    return filters;
+}
 
 frappe.ui.form.on('Material Request', {
 
@@ -266,9 +284,7 @@ frappe.ui.form.on('Material Request', {
 
                 return {
                     query: "erpnext.controllers.queries.item_query",
-                    filters: {
-                        "custom_category": frm.doc.custom_category
-                    }
+                    filters: get_item_category_filters(frm)
                 };
 
             } else {
@@ -281,11 +297,32 @@ frappe.ui.form.on('Material Request', {
                 };
             }
         });
+
+        // Sub Category dropdown me sirf selected category ki sub categories aaye
+        frm.set_query("custom_sub_category", function () {
+            return {
+                filters: {
+                    material_category: frm.doc.custom_category || ''
+                }
+            };
+        });
     },
 
     custom_category: function (frm) {
 
         console.log("Category Changed → Reset Items");
+
+        if (frm.doc.custom_sub_category) {
+            frm.set_value("custom_sub_category", "");
+        }
+
+        frm.clear_table("items");
+        frm.refresh_field("items");
+    },
+
+    custom_sub_category: function (frm) {
+
+        console.log("Sub Category Changed → Reset Items");
 
         frm.clear_table("items");
         frm.refresh_field("items");

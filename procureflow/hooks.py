@@ -11,7 +11,8 @@ doctype_js = {
     "Material Request": "public/js/material_request.js",
     "Supplier Quotation": "public/js/supplier_quotation.js"  ,
       "Purchase Order": "public/js/purchase_order.js"  ,
-      "Purchase Receipt": "public/js/purchase_receipt.js"  
+      "Purchase Receipt": "public/js/purchase_receipt.js"  ,
+      "Item": "public/js/item.js"
        # 🔥 THIS MISSING
 }
 
@@ -38,10 +39,15 @@ fixtures = [
         "filters": [
             ["name", "in", [
 
+                # Item
+                "Item-custom_category",
+                "Item-custom_sub_category",
+
                 # Material Request
                 "Material Request-custom_select_project_",
                 "Material Request-custom_remark",
                 "Material Request-custom_category",
+                "Material Request-custom_sub_category",
                 "Material Request-custom_add_receipt",
                 "Material Request-custom_priority",
                 "Material Request-custom_rejection_remark",
@@ -50,11 +56,13 @@ fixtures = [
                 "Supplier Quotation-custom_project_name",
                 "Supplier Quotation-custom_remark",
                 "Supplier Quotation-custom_category",
+                "Supplier Quotation-custom_sub_category",
 
                 # Purchase Order
                 "Purchase Order-custom_project_name",
                 "Purchase Order-custom_remark",
                 "Purchase Order-custom_category",
+                "Purchase Order-custom_sub_category",
                 "Purchase Order-custom_test_company_",
                 "Purchase Order-custom_add_receipt",
                 "Purchase Order-custom_priority",

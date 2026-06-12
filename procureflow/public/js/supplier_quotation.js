@@ -25,6 +25,12 @@ frappe.ui.form.on('Supplier Quotation', {
                     frm.set_value("custom_store_name", mr.set_warehouse);
                     frm.set_value("custom_remark", mr.custom_remark);
                      frm.set_value("custom_category", mr.custom_category)
+
+                    // null/"" normalize karke hi set karo, warna purane docs dirty ho jate hain
+                    let mr_sub = mr.custom_sub_category || "";
+                    if ((frm.doc.custom_sub_category || "") !== mr_sub) {
+                        frm.set_value("custom_sub_category", mr_sub);
+                    }
                 });
         }
     }
@@ -58,6 +64,12 @@ frappe.ui.form.on('Supplier Quotation', {
                         frm.set_value("custom_store_name", mr.set_warehouse);
                         frm.set_value("custom_remark", mr.custom_remark);
                         frm.set_value("custom_category", mr.custom_category)
+
+                        // null/"" normalize karke hi set karo, warna purane docs dirty ho jate hain
+                        let mr_sub = mr.custom_sub_category || "";
+                        if ((frm.doc.custom_sub_category || "") !== mr_sub) {
+                            frm.set_value("custom_sub_category", mr_sub);
+                        }
                     });
             }
         }
@@ -110,8 +122,27 @@ frappe.ui.form.on('Supplier Quotation', {
 });
 
 
-// child table filter 
+// child table filter
 
+// Shared filter: category + sub category
+// Sub category blank ho to sirf wahi items jo bina sub category ke hain
+// NOTE: shared global scope — same function material_request.js,
+// supplier_quotation.js, purchase_order.js teeno me hai, teeno copies
+// hamesha IDENTICAL rakho
+function get_item_category_filters(frm) {
+
+    let filters = {
+        "custom_category": frm.doc.custom_category
+    };
+
+    if (frm.doc.custom_sub_category) {
+        filters["custom_sub_category"] = frm.doc.custom_sub_category;
+    } else {
+        filters["custom_sub_category"] = ["is", "not set"];
+    }
+
+    return filters;
+}
 
 frappe.ui.form.on('Supplier Quotation', {
 
@@ -125,9 +156,7 @@ frappe.ui.form.on('Supplier Quotation', {
 
                 return {
                     query: "erpnext.controllers.queries.item_query",
-                    filters: {
-                        "custom_category": frm.doc.custom_category
-                    }
+                    filters: get_item_category_filters(frm)
                 };
 
             } else {
