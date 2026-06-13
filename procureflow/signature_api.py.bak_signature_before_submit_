@@ -25,9 +25,6 @@ def _set_if_field_exists(doc, fieldname, value):
 
 
 def set_purchase_order_company_signature(doc, method=None):
-    if method != "before_submit":
-        return
-
     company = doc.get('custom_test_company_') or doc.get('company')
     signature = get_company_authorized_signature(company)
     signature_image = signature.signature_image if signature else ''
