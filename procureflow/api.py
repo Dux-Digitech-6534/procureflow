@@ -110,6 +110,87 @@ def get_highest_priority(priorities):
 
 
 @frappe.whitelist()
+def get_material_request_from_item(material_request_item):
+    if not material_request_item:
+        frappe.throw(
+            frappe._("Material Request Item is required."),
+            frappe.ValidationError,
+        )
+
+    material_request = frappe.db.get_value(
+        "Material Request Item",
+        material_request_item,
+        "parent",
+    )
+
+    if not material_request:
+        frappe.throw(
+            frappe._("Material Request Item {0} was not found.").format(material_request_item),
+            frappe.ValidationError,
+        )
+
+    material_request_doc = frappe.get_doc("Material Request", material_request)
+    material_request_doc.check_permission("read")
+
+    for item in material_request_doc.get("items", []):
+        if item.name == material_request_item:
+            return material_request
+
+    frappe.throw(
+        frappe._("Material Request Item {0} does not belong to Material Request {1}.").format(
+            material_request_item, material_request
+        ),
+        frappe.ValidationError,
+    )
+
+
+@frappe.whitelist()
+def get_material_request_item_remark(material_request, material_request_item):
+    if not material_request or not material_request_item:
+        frappe.throw(
+            frappe._("Material Request and Material Request Item are required."),
+            frappe.ValidationError,
+        )
+
+    material_request_doc = frappe.get_doc("Material Request", material_request)
+    material_request_doc.check_permission("read")
+
+    for item in material_request_doc.get("items", []):
+        if item.name == material_request_item:
+            return item.get("custom_remark")
+
+    frappe.throw(
+        frappe._("Material Request Item {0} does not belong to Material Request {1}.").format(
+            material_request_item, material_request
+        ),
+        frappe.ValidationError,
+    )
+
+
+@frappe.whitelist()
+def get_purchase_order_item_remark(purchase_order, purchase_order_item):
+    if not purchase_order or not purchase_order_item:
+        frappe.throw(
+            frappe._("Purchase Order and Purchase Order Item are required."),
+            frappe.ValidationError,
+        )
+
+    purchase_order_doc = frappe.get_doc("Purchase Order", purchase_order)
+    purchase_order_doc.check_permission("read")
+
+    for item in purchase_order_doc.get("items", []):
+        if item.name == purchase_order_item:
+            return item.get("custom_remark")
+
+    frappe.throw(
+        frappe._("Purchase Order Item {0} does not belong to Purchase Order {1}.").format(
+            purchase_order_item, purchase_order
+        ),
+        frappe.ValidationError,
+    )
+
+
+@frappe.whitelist()
 def make_procureflow_payment_entry(source_name):
     return get_procureflow_payment_entry_defaults(source_name)
 

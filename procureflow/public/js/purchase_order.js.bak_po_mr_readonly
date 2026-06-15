@@ -658,15 +658,14 @@ async function get_linked_material_request_from_po(frm) {
 async function get_parent_mr_from_mr_item(material_request_item_name) {
 
     try {
-        let r = await frappe.call({
-            method: "procureflow.api.get_material_request_from_item",
-            args: {
-                material_request_item: material_request_item_name
-            }
-        });
+        let r = await frappe.db.get_value(
+            "Material Request Item",
+            material_request_item_name,
+            "parent"
+        );
 
-        if (r.message) {
-            return r.message;
+        if (r.message && r.message.parent) {
+            return r.message.parent;
         }
 
     } catch (e) {
@@ -889,104 +888,6 @@ function hide_purchase_order_buttons(frm) {
 
     }, 300);
 }
-
-function is_po_against_material_request(frm) {
-    return (frm.doc.items || []).some(row => {
-        return !!(row.material_request || row.material_request_item);
-    });
-}
-
-function set_purchase_order_mr_fields_readonly(frm) {
-    if (!frm || frm.doctype !== "Purchase Order") {
-        return;
-    }
-
-    const is_from_mr = is_po_against_material_request(frm);
-    const parent_fields = [
-        "custom_project_name",
-        "custom_test_company_",
-        "custom_category",
-        "custom_sub_category",
-        "custom_priority",
-        "custom_remark",
-        "custom_add_receipt"
-    ];
-
-    parent_fields.forEach(fieldname => {
-        if (frm.fields_dict[fieldname]) {
-            frm.set_df_property(fieldname, "read_only", is_from_mr ? 1 : 0);
-            frm.refresh_field(fieldname);
-        }
-    });
-}
-
-function copy_mr_item_remark_to_po_items(frm) {
-    if (!frm || frm.doctype !== "Purchase Order") {
-        return;
-    }
-
-    const rows = (frm.doc.items || []).filter(row => {
-        return row.material_request_item && !row.custom_remark;
-    });
-
-    rows.forEach(row => {
-        frappe.call({
-            method: "procureflow.api.get_material_request_item_remark",
-            args: {
-                material_request: row.material_request,
-                material_request_item: row.material_request_item
-            }
-        }).then(r => {
-            const value = r && r.message;
-            if (value && !row.custom_remark) {
-                frappe.model.set_value(row.doctype, row.name, "custom_remark", value);
-            }
-        });
-    });
-}
-
-function apply_po_mr_readonly_and_remark_mapping(frm) {
-    copy_mr_item_remark_to_po_items(frm);
-    set_purchase_order_mr_fields_readonly(frm);
-}
-
-frappe.ui.form.on("Purchase Order", {
-    refresh: function (frm) {
-        apply_po_mr_readonly_and_remark_mapping(frm);
-        setTimeout(() => apply_po_mr_readonly_and_remark_mapping(frm), 500);
-        setTimeout(() => apply_po_mr_readonly_and_remark_mapping(frm), 1200);
-    },
-
-    onload_post_render: function (frm) {
-        apply_po_mr_readonly_and_remark_mapping(frm);
-    },
-
-    validate: function (frm) {
-        set_purchase_order_mr_fields_readonly(frm);
-    },
-
-    items_on_form_rendered: function (frm) {
-        set_purchase_order_mr_fields_readonly(frm);
-    }
-});
-
-frappe.ui.form.on("Purchase Order Item", {
-    items_add: function (frm, cdt, cdn) {
-        set_purchase_order_mr_fields_readonly(frm);
-    },
-
-    items_remove: function (frm, cdt, cdn) {
-        set_purchase_order_mr_fields_readonly(frm);
-    },
-
-    material_request: function (frm, cdt, cdn) {
-        setTimeout(() => apply_po_mr_readonly_and_remark_mapping(frm), 300);
-    },
-
-    material_request_item: function (frm, cdt, cdn) {
-        setTimeout(() => apply_po_mr_readonly_and_remark_mapping(frm), 300);
-    }
-});
 
 
 // purchase order company cascadding 

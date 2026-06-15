@@ -84,8 +84,7 @@ fixtures = [
                 "Purchase Receipt-custom_test_company_",
                 "Purchase Receipt-custom_payment_status",
                 "Purchase Receipt-custom_total_paid_amount",
-                "Purchase Receipt-custom_outstanding_amount",
-                "Purchase Receipt Item-custom_remark"
+                "Purchase Receipt-custom_outstanding_amount"
 
             ]]
         ]

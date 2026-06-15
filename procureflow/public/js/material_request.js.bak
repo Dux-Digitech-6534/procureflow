@@ -189,12 +189,6 @@ function open_item_popup(frm) {
             },
 
             {
-                label: __('Remark'),
-                fieldname: 'custom_remark',
-                fieldtype: 'Small Text'
-            },
-
-            {
                 label: 'UOM',
                 fieldname: 'uom',
                 fieldtype: 'Link',
@@ -225,7 +219,6 @@ function open_item_popup(frm) {
             child.uom = values.uom;
             child.conversion_factor = values.conversion_factor || 1;
             child.custom_specification = values.custom_specification;
-            child.custom_remark = values.custom_remark;
 
             frm.refresh_field('items');
 
@@ -409,66 +402,10 @@ function hide_material_request_buttons(frm) {
     }, 500);
 }
 
-function show_pending_po_in_material_request(frm) {
-    if (!frm || frm.doctype !== "Material Request") {
-        return;
-    }
-
-    if (frm.doc.status !== "Pending") {
-        return;
-    }
-
-    const update_label = () => {
-        if (frm.doc.status !== "Pending") {
-            return;
-        }
-
-        if (frm.page && frm.page.set_indicator) {
-            frm.page.set_indicator(__("Pending PO"), "orange");
-        }
-
-        if (!frm.page || !frm.page.wrapper) {
-            return;
-        }
-
-        const selectors = [
-            ".indicator-pill",
-            ".indicator-pill-right",
-            ".indicator",
-            ".badge",
-            ".form-dashboard .indicator-pill"
-        ];
-
-        selectors.forEach((selector) => {
-            frm.page.wrapper.find(selector).each(function () {
-                const $el = $(this);
-                if ($el.text().trim() === "Pending") {
-                    $el.text(__("Pending PO"));
-                }
-            });
-        });
-    };
-
-    update_label();
-
-    setTimeout(update_label, 200);
-    setTimeout(update_label, 600);
-    setTimeout(update_label, 1000);
-}
-
 
 frappe.ui.form.on("Material Request", {
     refresh: function (frm) {
-        show_pending_po_in_material_request(frm);
         setup_material_request_rejection_reason(frm);
-    },
-
-    onload_post_render: function (frm) {
-        show_pending_po_in_material_request(frm);
-    },
-
-    after_save: function (frm) {
-        show_pending_po_in_material_request(frm);
     }
 });
 

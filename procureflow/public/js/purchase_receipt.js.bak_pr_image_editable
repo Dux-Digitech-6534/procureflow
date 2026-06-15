@@ -225,30 +225,18 @@ function set_purchase_receipt_po_fields_readonly(frm) {
 
     const is_from_po = is_pr_against_purchase_order(frm);
     const parent_fields = [
+        "supplier",
+        "company",
         "custom_project_name",
         "custom_test_company_",
-        "custom_category",
-        "custom_sub_category",
-        "custom_priority",
         "custom_remark",
+        "custom_add_material",
+        "custom_add_invoice"
     ];
 
     parent_fields.forEach(fieldname => {
         if (frm.fields_dict[fieldname]) {
             frm.set_df_property(fieldname, "read_only", is_from_po ? 1 : 0);
-            frm.refresh_field(fieldname);
-        }
-    });
-
-    [
-        "custom_add_receipt",
-        "image_of_material_receipt",
-        "image_of_invoice_receipt",
-        "custom_image_of_material_receipt",
-        "custom_image_of_invoice_receipt"
-    ].forEach(fieldname => {
-        if (frm.fields_dict[fieldname]) {
-            frm.set_df_property(fieldname, "read_only", 0);
             frm.refresh_field(fieldname);
         }
     });
@@ -264,18 +252,13 @@ function copy_po_item_remark_to_pr_items(frm) {
     });
 
     rows.forEach(row => {
-        frappe.call({
-            method: "procureflow.api.get_purchase_order_item_remark",
-            args: {
-                purchase_order: row.purchase_order,
-                purchase_order_item: row.purchase_order_item
-            }
-        }).then(r => {
-            const value = r && r.message;
-            if (value && !row.custom_remark) {
-                frappe.model.set_value(row.doctype, row.name, "custom_remark", value);
-            }
-        });
+        frappe.db.get_value("Purchase Order Item", row.purchase_order_item, "custom_remark")
+            .then(r => {
+                const value = r && r.message && r.message.custom_remark;
+                if (value && !row.custom_remark) {
+                    frappe.model.set_value(row.doctype, row.name, "custom_remark", value);
+                }
+            });
     });
 }
 

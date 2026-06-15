@@ -17,11 +17,6 @@ doctype_js = {
 }
 
 
-doctype_list_js = {
-    "Material Request": "public/js/material_request_list.js"
-}
-
-
 doc_events = {
     'Purchase Order': {
         'before_save': [
@@ -73,7 +68,6 @@ fixtures = [
                 "Purchase Order-custom_authorized_signature",
                 "Purchase Order-custom_company_signature",
                 "Purchase Order-custom_rejection_remark",
-                "Purchase Order Item-custom_remark",
 
                 # Purchase Receipt
                 "Purchase Receipt-custom_add_material",
@@ -84,8 +78,7 @@ fixtures = [
                 "Purchase Receipt-custom_test_company_",
                 "Purchase Receipt-custom_payment_status",
                 "Purchase Receipt-custom_total_paid_amount",
-                "Purchase Receipt-custom_outstanding_amount",
-                "Purchase Receipt Item-custom_remark"
+                "Purchase Receipt-custom_outstanding_amount"
 
             ]]
         ]
@@ -175,9 +168,6 @@ fixtures = [
 
 # Sanskruti Group branding assets
 app_include_css = ["/assets/procureflow/css/sanskruti_branding.css"]
-app_include_js = [
-    "/assets/procureflow/js/sanskruti_branding.js",
-    "/assets/procureflow/js/material_request_list.js"
-]
+app_include_js = ["/assets/procureflow/js/sanskruti_branding.js"]
 web_include_css = ["/assets/procureflow/css/sanskruti_branding.css"]
 web_include_js = ["/assets/procureflow/js/sanskruti_branding.js"]
