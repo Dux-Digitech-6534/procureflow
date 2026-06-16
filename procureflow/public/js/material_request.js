@@ -151,7 +151,9 @@ function open_item_popup(frm) {
                                         parent: item,
                                         uom: stock_uom
                                     },
-                                    'conversion_factor'
+                                    'conversion_factor',
+                                    null,
+                                    'Item'
                                 ).then(cf => {
 
                                     if (cf.message && cf.message.conversion_factor) {
