@@ -53,11 +53,14 @@ function show_procureflow_payment_status(frm) {
     }
 
     const update_indicator = () => {
-        const default_statuses = [
+        const replaceable_statuses = [
             "To Bill",
             "Completed",
             "Draft",
-            "Cancelled"
+            "Cancelled",
+            "Not Paid",
+            "Partially Paid",
+            "Fully Paid"
         ];
 
         if (frm.dashboard && frm.dashboard.clear_headline) {
@@ -69,55 +72,15 @@ function show_procureflow_payment_status(frm) {
                 .find(".indicator-pill, .indicator, .indicator-pill-right")
                 .each(function () {
                     const text = $(this).text().trim();
-                    if (default_statuses.includes(text)) {
+                    if (replaceable_statuses.includes(text)) {
                         $(this).remove();
                     }
                 });
         }
 
-        setTimeout(() => {
-            if (!frm.page || !frm.page.wrapper) {
-                return;
-            }
-
-            const $wrapper = $(frm.page.wrapper);
-            const $existing_custom = $wrapper.find(".custom-payment-status-indicator");
-            if ($existing_custom.length) {
-                $existing_custom.remove();
-            }
-
-            let $title = $wrapper
-                .find(".page-title .title-text:visible")
-                .last();
-
-            if (!$title.length) {
-                $title = $wrapper
-                    .find(".title-area .title-text:visible")
-                    .last();
-            }
-
-            if (!$title.length) {
-                $title = $wrapper
-                    .find(".page-head .title-text:visible")
-                    .last();
-            }
-
-            if (!$title.length) {
-                $title = $wrapper
-                    .find(".page-title h3:visible, .title-area h3:visible")
-                    .last();
-            }
-
-            if (!$title.length) {
-                return;
-            }
-
-            $title.after(
-                `<span class="indicator-pill ${color} custom-payment-status-indicator" style="margin-left: 8px;">
-                    <span>${frappe.utils.escape_html(__(status))}</span>
-                </span>`
-            );
-        }, 100);
+        if (frm.page && frm.page.set_indicator) {
+            frm.page.set_indicator(__(status), color);
+        }
     };
 
     update_indicator();

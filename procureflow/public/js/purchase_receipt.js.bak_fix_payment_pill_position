@@ -75,6 +75,10 @@ function show_procureflow_payment_status(frm) {
                 });
         }
 
+        if (frm.page && frm.page.set_indicator) {
+            frm.page.set_indicator(__(status), color);
+        }
+
         setTimeout(() => {
             if (!frm.page || !frm.page.wrapper) {
                 return;
@@ -86,27 +90,19 @@ function show_procureflow_payment_status(frm) {
                 $existing_custom.remove();
             }
 
-            let $title = $wrapper
-                .find(".page-title .title-text:visible")
-                .last();
+            const already_visible = $wrapper
+                .find(".indicator-pill, .indicator, .indicator-pill-right")
+                .filter(function () {
+                    return $(this).text().trim() === status;
+                }).length > 0;
 
-            if (!$title.length) {
-                $title = $wrapper
-                    .find(".title-area .title-text:visible")
-                    .last();
+            if (already_visible) {
+                return;
             }
 
-            if (!$title.length) {
-                $title = $wrapper
-                    .find(".page-head .title-text:visible")
-                    .last();
-            }
-
-            if (!$title.length) {
-                $title = $wrapper
-                    .find(".page-title h3:visible, .title-area h3:visible")
-                    .last();
-            }
+            const $title = $wrapper
+                .find(".title-area h3, .page-title h3, .title-text")
+                .first();
 
             if (!$title.length) {
                 return;

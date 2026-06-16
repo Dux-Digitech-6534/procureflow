@@ -2,7 +2,6 @@ frappe.ui.form.on("Purchase Receipt", {
     onload: function (frm) {
         hide_purchase_receipt_buttons(frm);
         set_project_company_from_purchase_order(frm);
-        show_procureflow_payment_status(frm);
     },
 
     refresh: function (frm) {
@@ -17,18 +16,12 @@ frappe.ui.form.on("Purchase Receipt", {
         setTimeout(() => set_project_company_from_purchase_order(frm), 500);
         setTimeout(() => set_project_company_from_purchase_order(frm), 1000);
         setTimeout(() => show_procureflow_payment_status(frm), 500);
-        setTimeout(() => show_procureflow_payment_status(frm), 1000);
-        setTimeout(() => show_procureflow_payment_status(frm), 1500);
         setTimeout(() => setup_purchase_receipt_create_menu(frm), 500);
         setTimeout(() => setup_purchase_receipt_create_menu(frm), 1000);
     },
 
     custom_project_name: function (frm) {
         set_company_from_project_master(frm);
-    },
-
-    custom_payment_status: function (frm) {
-        show_procureflow_payment_status(frm);
     }
 });
 
@@ -39,90 +32,10 @@ frappe.ui.form.on("Purchase Receipt Item", {
 });
 
 function show_procureflow_payment_status(frm) {
-    if (!frm || frm.doctype !== "Purchase Receipt") {
-        return;
+    if (frm.doc.custom_payment_status) {
+        let color = frm.doc.custom_payment_status === "Fully Paid" ? "green" : "orange";
+        frm.page.set_indicator(__(frm.doc.custom_payment_status), color);
     }
-
-    const status = frm.doc.custom_payment_status || "Not Paid";
-    let color = "red";
-
-    if (status === "Fully Paid") {
-        color = "green";
-    } else if (status === "Partially Paid") {
-        color = "orange";
-    }
-
-    const update_indicator = () => {
-        const default_statuses = [
-            "To Bill",
-            "Completed",
-            "Draft",
-            "Cancelled"
-        ];
-
-        if (frm.dashboard && frm.dashboard.clear_headline) {
-            frm.dashboard.clear_headline();
-        }
-
-        if (frm.page && frm.page.wrapper) {
-            $(frm.page.wrapper)
-                .find(".indicator-pill, .indicator, .indicator-pill-right")
-                .each(function () {
-                    const text = $(this).text().trim();
-                    if (default_statuses.includes(text)) {
-                        $(this).remove();
-                    }
-                });
-        }
-
-        setTimeout(() => {
-            if (!frm.page || !frm.page.wrapper) {
-                return;
-            }
-
-            const $wrapper = $(frm.page.wrapper);
-            const $existing_custom = $wrapper.find(".custom-payment-status-indicator");
-            if ($existing_custom.length) {
-                $existing_custom.remove();
-            }
-
-            let $title = $wrapper
-                .find(".page-title .title-text:visible")
-                .last();
-
-            if (!$title.length) {
-                $title = $wrapper
-                    .find(".title-area .title-text:visible")
-                    .last();
-            }
-
-            if (!$title.length) {
-                $title = $wrapper
-                    .find(".page-head .title-text:visible")
-                    .last();
-            }
-
-            if (!$title.length) {
-                $title = $wrapper
-                    .find(".page-title h3:visible, .title-area h3:visible")
-                    .last();
-            }
-
-            if (!$title.length) {
-                return;
-            }
-
-            $title.after(
-                `<span class="indicator-pill ${color} custom-payment-status-indicator" style="margin-left: 8px;">
-                    <span>${frappe.utils.escape_html(__(status))}</span>
-                </span>`
-            );
-        }, 100);
-    };
-
-    update_indicator();
-    setTimeout(update_indicator, 300);
-    setTimeout(update_indicator, 800);
 }
 
 function set_company_from_project_master(frm) {

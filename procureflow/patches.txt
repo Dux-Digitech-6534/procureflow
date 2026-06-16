@@ -6,3 +6,5 @@
 # Patches added in this section will be executed after doctypes are migrated
 procureflow.patches.add_purchase_order_item_custom_remark
 procureflow.patches.add_purchase_receipt_item_custom_remark
+procureflow.patches.set_purchase_receipt_payment_status_list_view
+procureflow.patches.recalculate_purchase_receipt_payment_status

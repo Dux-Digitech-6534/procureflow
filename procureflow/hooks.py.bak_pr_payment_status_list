@@ -178,8 +178,7 @@ fixtures = [
 app_include_css = ["/assets/procureflow/css/sanskruti_branding.css"]
 app_include_js = [
     "/assets/procureflow/js/sanskruti_branding.js",
-    "/assets/procureflow/js/material_request_list.js",
-    "/assets/procureflow/js/purchase_receipt_list.js"
+    "/assets/procureflow/js/material_request_list.js"
 ]
 web_include_css = ["/assets/procureflow/css/sanskruti_branding.css"]
 web_include_js = ["/assets/procureflow/js/sanskruti_branding.js"]

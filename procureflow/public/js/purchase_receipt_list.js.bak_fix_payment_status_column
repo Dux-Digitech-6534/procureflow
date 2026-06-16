@@ -1,0 +1,36 @@
+function get_purchase_receipt_payment_status_indicator(doc) {
+    if (doc.custom_payment_status === "Fully Paid") {
+        return [__("Fully Paid"), "green", "custom_payment_status,=,Fully Paid"];
+    }
+
+    if (doc.custom_payment_status === "Partially Paid") {
+        return [__("Partially Paid"), "orange", "custom_payment_status,=,Partially Paid"];
+    }
+
+    if (doc.custom_payment_status === "Not Paid") {
+        return [__("Not Paid"), "red", "custom_payment_status,=,Not Paid"];
+    }
+
+    return [__("Not Paid"), "red", "custom_payment_status,=,Not Paid"];
+}
+
+function apply_purchase_receipt_payment_status_list_settings() {
+    frappe.listview_settings["Purchase Receipt"] =
+        frappe.listview_settings["Purchase Receipt"] || {};
+
+    const settings = frappe.listview_settings["Purchase Receipt"];
+    const add_fields = settings.add_fields || [];
+
+    if (!add_fields.includes("custom_payment_status")) {
+        settings.add_fields = add_fields.concat(["custom_payment_status"]);
+    }
+
+    settings.get_indicator = get_purchase_receipt_payment_status_indicator;
+    settings.hide_name_column = false;
+}
+
+apply_purchase_receipt_payment_status_list_settings();
+
+frappe.after_ajax(() => {
+    apply_purchase_receipt_payment_status_list_settings();
+});

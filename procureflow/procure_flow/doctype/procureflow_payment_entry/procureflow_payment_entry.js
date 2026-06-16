@@ -30,7 +30,7 @@ function set_company_from_project(frm) {
 }
 
 function set_payment_entry_values_from_purchase_receipt(frm) {
-    if (!frm.doc.purchase_receipt) {
+    if (frm.doc.docstatus !== 0 || !frm.doc.purchase_receipt) {
         return;
     }
 

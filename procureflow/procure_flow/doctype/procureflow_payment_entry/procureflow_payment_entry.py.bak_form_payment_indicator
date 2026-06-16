@@ -12,15 +12,11 @@ from procureflow.api import populate_purchase_receipt_project_company_from_purch
 class ProcureflowPaymentEntry(Document):
     def validate(self):
         self.validate_required_values()
-        if self.docstatus == 0:
-            self.validate_and_set_purchase_receipt_values()
-            self.set_payment_summary()
-            self.validate_amount()
-
-    def before_submit(self):
-        self.validate_required_values()
         self.validate_and_set_purchase_receipt_values()
         self.set_payment_summary()
+        self.validate_amount()
+
+    def before_submit(self):
         self.validate_amount()
 
     def on_submit(self):
