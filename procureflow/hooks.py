@@ -137,6 +137,7 @@ fixtures = [
         "filters": [
             ["name", "in", [
                 "Purchase Order Item-rate-label",
+                "Purchase Order Item-amount-label",
                 "Purchase Order Item-schedule_date-columns",
                 "Purchase Order Item-rate-columns"
             ]]
