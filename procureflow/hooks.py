@@ -25,6 +25,7 @@ doctype_list_js = {
 
 doc_events = {
     'Purchase Order': {
+        'validate': 'procureflow.purchase_tax.purchase_order_validate',
         'before_save': [
             'procureflow.api.copy_receipt_from_material_request',
         ],
@@ -74,7 +75,10 @@ fixtures = [
                 "Purchase Order-custom_authorized_signature",
                 "Purchase Order-custom_company_signature",
                 "Purchase Order-custom_rejection_remark",
+                "Purchase Order-custom_tax_type",
                 "Purchase Order Item-custom_remark",
+                "Purchase Order Item-custom_gst_percent",
+                "Purchase Order Item-custom_rate_with_tax",
 
                 # Purchase Receipt
                 "Purchase Receipt-custom_add_material",
@@ -126,6 +130,14 @@ fixtures = [
         "dt": "Print Format",
         "filters": [
             ["name", "=", "Sanskruti PO Print Format"]
+        ]
+    },
+    {
+        "dt": "Property Setter",
+        "filters": [
+            ["name", "in", [
+                "Purchase Order Item-rate-label"
+            ]]
         ]
     }
 ]

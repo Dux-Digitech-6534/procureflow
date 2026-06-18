@@ -1132,3 +1132,111 @@ function show_rejection_reason_dialog(frm, fieldname) {
 
     dialog.show();
 }
+
+
+// =====================================================
+// PROCUREFLOW: In-child-table GST
+//   - rate (Without Tax)  <->  custom_rate_with_tax   (two-way auto-calc)
+//   - custom_gst_percent prefilled from the item's Item Tax Template
+//   - custom_tax_type (Intra/Inter) auto-detected from supplier vs company state
+//
+// NOTE: the CGST/SGST/IGST tax rows and the tax-inclusive grand total are built
+// server-side on Save (procureflow.purchase_tax.purchase_order_validate), so the
+// breakdown + grand total refresh after you Save the Purchase Order.
+// =====================================================
+
+frappe.ui.form.on("Purchase Order Item", {
+    item_code: function (frm, cdt, cdn) {
+        let row = locals[cdt][cdn];
+        if (!row.item_code || flt(row.custom_gst_percent)) {
+            return;
+        }
+        // Prefill GST % from the item's Item Tax Template (only when blank).
+        frappe.call({
+            method: "procureflow.purchase_tax.get_item_gst_rate",
+            args: { item_code: row.item_code, company: frm.doc.company }
+        }).then(r => {
+            let gst = flt(r && r.message);
+            let current = locals[cdt][cdn];
+            if (gst && current && !flt(current.custom_gst_percent)) {
+                frappe.model.set_value(cdt, cdn, "custom_gst_percent", gst);
+            }
+        });
+    },
+
+    rate: function (frm, cdt, cdn) {
+        pf_sync_rate_with_tax(frm, cdt, cdn);
+    },
+
+    custom_gst_percent: function (frm, cdt, cdn) {
+        pf_sync_rate_with_tax(frm, cdt, cdn);
+    },
+
+    custom_rate_with_tax: function (frm, cdt, cdn) {
+        pf_sync_rate_from_with_tax(frm, cdt, cdn);
+    }
+});
+
+function pf_set(frm, cdt, cdn, field, value) {
+    frm.__pf_busy = true;
+    let p = frappe.model.set_value(cdt, cdn, field, value);
+    if (p && typeof p.finally === "function") {
+        p.finally(() => { frm.__pf_busy = false; });
+    } else {
+        frm.__pf_busy = false;
+    }
+}
+
+// rate (without tax) + GST %  ->  rate with tax
+function pf_sync_rate_with_tax(frm, cdt, cdn) {
+    if (frm.__pf_busy) {
+        return;
+    }
+    let row = locals[cdt][cdn];
+    let gst = flt(row.custom_gst_percent);
+    let rate = flt(row.rate);
+    let expected = flt(rate * (1 + gst / 100), 2);
+    if (flt(row.custom_rate_with_tax, 2) === expected) {
+        return;
+    }
+    pf_set(frm, cdt, cdn, "custom_rate_with_tax", expected);
+}
+
+// rate with tax  ->  rate (without tax)   [rate drives amount & totals]
+function pf_sync_rate_from_with_tax(frm, cdt, cdn) {
+    if (frm.__pf_busy) {
+        return;
+    }
+    let row = locals[cdt][cdn];
+    let gst = flt(row.custom_gst_percent);
+    let rwt = flt(row.custom_rate_with_tax);
+    let new_rate = gst ? flt(rwt / (1 + gst / 100), 6) : rwt;
+    if (flt(row.rate, 6) === flt(new_rate, 6)) {
+        return;
+    }
+    pf_set(frm, cdt, cdn, "rate", new_rate);
+}
+
+// Auto-detect Intra/Inter state -> custom_tax_type (manual override respected)
+frappe.ui.form.on("Purchase Order", {
+    refresh: function (frm) {
+        pf_detect_tax_type(frm);
+    },
+    supplier: function (frm) {
+        pf_detect_tax_type(frm);
+    }
+});
+
+function pf_detect_tax_type(frm) {
+    if (!frm.doc.supplier || !frm.doc.company || frm.doc.custom_tax_type) {
+        return;
+    }
+    frappe.call({
+        method: "procureflow.purchase_tax.get_party_tax_type",
+        args: { supplier: frm.doc.supplier, company: frm.doc.company }
+    }).then(r => {
+        if (r && r.message && !frm.doc.custom_tax_type) {
+            frm.set_value("custom_tax_type", r.message);
+        }
+    });
+}
