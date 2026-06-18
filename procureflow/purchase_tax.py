@@ -198,6 +198,12 @@ def _normalize_item_rates(doc):
         item.custom_rate_with_tax = flt(rate * (1 + gst / 100.0), 2)
 
 
+def _is_tax_account(account):
+    if not account:
+        return False
+    return frappe.get_cached_value("Account", account, "account_type") == "Tax"
+
+
 def _apply_gst_taxes(doc):
     company = doc.company
     if not company:
@@ -206,8 +212,25 @@ def _apply_gst_taxes(doc):
     accounts = get_gst_accounts(company)
     our_accounts = set(accounts.values())
 
-    # Drop only the rows we previously managed; leave any other manual rows alone.
-    doc.set("taxes", [t for t in doc.get("taxes", []) if t.account_head not in our_accounts])
+    # GST here is driven SOLELY by custom_gst_percent. ERPNext otherwise
+    # auto-injects tax rows from each item's Item Tax Template (the
+    # "Add taxes from item tax template" Accounts Setting), which would double
+    # up with our rows. Clear the per-item templates/rates so the framework
+    # cannot re-add them on recalculation.
+    for item in doc.get("items", []):
+        if item.get("item_tax_template"):
+            item.item_tax_template = None
+        if item.get("item_tax_rate") and item.item_tax_rate not in ("{}", ""):
+            item.item_tax_rate = "{}"
+
+    # Drop our previous rows AND any tax-account rows auto-added from item
+    # templates; keep genuine non-tax charge rows (freight, etc.) untouched.
+    kept = []
+    for t in doc.get("taxes", []):
+        if t.account_head in our_accounts or _is_tax_account(t.account_head):
+            continue
+        kept.append(t)
+    doc.set("taxes", kept)
 
     taxed = []  # (base_amount, gst) for taxable lines
     total_lines_with_amount = 0
