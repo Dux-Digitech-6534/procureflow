@@ -681,16 +681,25 @@ def payment_defaults(purchase_receipt):
 
 @frappe.whitelist()
 def save_payment(data):
+    from procureflow.api import get_procureflow_payment_entry_defaults
+
     data = _loads(data)
     pr = data.get("purchase_receipt")
     if not pr:
         frappe.throw(_("Select a purchase receipt."))
+
+    # Set supplier/project/company from the receipt so they match the payment
+    # entry's own validation (which requires them to equal the PR's values).
+    defaults = get_procureflow_payment_entry_defaults(pr)
     doc = frappe.new_doc("Procureflow Payment Entry")
     doc.purchase_receipt = pr
+    doc.supplier = defaults.get("supplier")
+    doc.project = defaults.get("project")
+    doc.company = defaults.get("company")
     doc.payment_date = data.get("payment_date") or nowdate()
     doc.amount = flt(data.get("amount"))
     doc.remark = data.get("remark")
-    doc.insert()  # validate fills supplier/project/company + outstanding
+    doc.insert()
     doc.submit()  # stamps the PR payment status
     return {"name": doc.name}
 
