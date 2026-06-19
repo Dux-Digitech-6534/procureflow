@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import {
 	API,
@@ -79,9 +79,23 @@ export function NewPurchaseOrder() {
 	const [err, setErr] = useState('');
 	const [seeded, setSeeded] = useState(false);
 
+	// Deep-link from an approved Material Request ("Create purchase order" button):
+	// /purchase-orders/new?mr=<name> auto-pulls that MR's items, project & category.
+	const [searchParams] = useSearchParams();
+	const mrParam = searchParams.get('mr');
+	const [mrPulled, setMrPulled] = useState(false);
+
 	useEffect(() => {
 		if (!isEdit && ctx && !requiredBy) setRequiredBy(ctx.today);
 	}, [ctx, isEdit, requiredBy]);
+
+	useEffect(() => {
+		if (!isEdit && mrParam && !mrPulled) {
+			setMrPulled(true);
+			void pullFromMr(mrParam);
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [isEdit, mrParam, mrPulled]);
 
 	useEffect(() => {
 		if (isEdit && detail && !seeded) {

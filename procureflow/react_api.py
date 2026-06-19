@@ -258,6 +258,14 @@ def mr_list(search="", limit=100):
 def mr_detail(name):
     doc = frappe.get_doc("Material Request", name)
     doc.check_permission("read")
+    # Whether the current user may raise a PO from this (approved, still-orderable)
+    # request — surfaces the "Create purchase order" button on the MR detail page.
+    can_create_po = bool(
+        doc.docstatus == 1
+        and doc.material_request_type == MR_TYPE
+        and flt(doc.get("per_ordered")) < 100
+        and frappe.has_permission("Purchase Order", "create")
+    )
     items = []
     for it in doc.items:
         sub = frappe.db.get_value("Item", it.item_code, "custom_sub_category")
@@ -286,6 +294,7 @@ def mr_detail(name):
         "owner": doc.owner,
         "attachment": doc.get("custom_add_receipt"),
         "items": items,
+        "can_create_po": can_create_po,
         **_doc_action_state(doc),
     }
 

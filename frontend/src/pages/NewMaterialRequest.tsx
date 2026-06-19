@@ -255,6 +255,15 @@ export function NewMaterialRequest() {
 						{saving ? 'Saving…' : 'Save changes'}
 					</button>
 				)}
+				{isEdit && detail?.can_create_po && (
+					<button
+						className="btn primary"
+						onClick={() => navigate('/purchase-orders/new?mr=' + encodeURIComponent(detail.name))}
+						title="Raise a purchase order for this request's items"
+					>
+						<Icon name="cube" size={15} /> Create purchase order
+					</button>
+				)}
 				{isEdit && detail && (
 					<DocLifecycleActions
 						doctype="Material Request"

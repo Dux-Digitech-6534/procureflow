@@ -93,6 +93,7 @@ export interface MrDetail extends DocActionState {
 	owner: string;
 	attachment: string | null;
 	items: MrLine[];
+	can_create_po: boolean;
 }
 
 export interface SaveMrResult {
