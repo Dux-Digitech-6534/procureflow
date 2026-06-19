@@ -1,16 +1,19 @@
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useFrappeAuth } from 'frappe-react-sdk';
 import { Icon, type IconName } from './Icon';
 import { useTheme } from '../lib/theme';
 
-const NAV: { to: string; label: string; icon: IconName; end?: boolean }[] = [
+const NAV: { to: string; label: string; icon: IconName }[] = [
 	{ to: '/material-requests', label: 'Material requests', icon: 'file-text' },
 	{ to: '/purchase-orders', label: 'Purchase orders', icon: 'cube' },
+	{ to: '/approvals', label: 'Approvals', icon: 'shield-check' },
 	{ to: '/payments', label: 'Payments', icon: 'banknote' },
 ];
 
 const BRAND = import.meta.env.BASE_URL + 'brand/';
 const COMPANY_LOGO = '/assets/procureflow/img/sanskruti-group-asia-logo.png';
+const COLLAPSE_KEY = 'procureflow:nav-collapsed';
 
 function initialsOf(user: string | null | undefined): string {
 	if (!user) return '·';
@@ -20,17 +23,34 @@ function initialsOf(user: string | null | undefined): string {
 	return letters.toUpperCase();
 }
 
+function getInitialCollapsed(): boolean {
+	try {
+		return localStorage.getItem(COLLAPSE_KEY) === '1';
+	} catch {
+		return false;
+	}
+}
+
 const linkClass = ({ isActive }: { isActive: boolean }) => (isActive ? 'on' : '');
 
 export function AppShell() {
 	const { theme, toggle } = useTheme();
 	const { currentUser } = useFrappeAuth();
+	const [collapsed, setCollapsed] = useState(getInitialCollapsed);
+
+	useEffect(() => {
+		try {
+			localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0');
+		} catch {
+			/* not persistable — toggle still works this session */
+		}
+	}, [collapsed]);
 
 	return (
 		<div className="layout">
-			<aside className="sidebar">
+			<aside className={collapsed ? 'sidebar collapsed' : 'sidebar'}>
 				<div className="brand">
-					<img className="cologo" src={COMPANY_LOGO} alt="Sanskruti" style={{ maxHeight: 52, width: 'auto' }} />
+					<img className="cologo" src={COMPANY_LOGO} alt="Sanskruti" style={{ maxHeight: collapsed ? 30 : 52, width: 'auto' }} />
 					<div className="btext">
 						<div className="nm">
 							Procure<em>Flow</em>
@@ -40,13 +60,13 @@ export function AppShell() {
 
 				<nav className="snav">
 					{NAV.map((item) => (
-						<NavLink key={item.to} to={item.to} end={item.end} className={linkClass}>
+						<NavLink key={item.to} to={item.to} className={linkClass} title={collapsed ? item.label : undefined}>
 							<Icon name={item.icon} size={16} />
 							<span className="lbl">{item.label}</span>
 						</NavLink>
 					))}
 					<div className="push" />
-					<NavLink to="/settings" className={linkClass}>
+					<NavLink to="/settings" className={linkClass} title={collapsed ? 'Settings' : undefined}>
 						<Icon name="sliders" size={16} />
 						<span className="lbl">Settings</span>
 					</NavLink>
@@ -59,6 +79,14 @@ export function AppShell() {
 				</a>
 
 				<div className="sfoot">
+					<button
+						className="icbtn collapse-btn"
+						onClick={() => setCollapsed((c) => !c)}
+						title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+						aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+					>
+						<Icon name="chevron" size={16} />
+					</button>
 					<button className="icbtn" onClick={toggle} title="Toggle theme" aria-label="Toggle theme">
 						<Icon name={theme === 'dark' ? 'sun' : 'moon'} size={17} />
 					</button>

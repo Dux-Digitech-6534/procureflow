@@ -7,6 +7,7 @@ import { MaterialRequests } from './pages/MaterialRequests';
 import { NewMaterialRequest } from './pages/NewMaterialRequest';
 import { PurchaseOrders } from './pages/PurchaseOrders';
 import { NewPurchaseOrder } from './pages/NewPurchaseOrder';
+import { Approvals } from './pages/Approvals';
 import { Settings } from './pages/Settings';
 import { Placeholder } from './pages/Placeholder';
 
@@ -36,6 +37,7 @@ export default function App() {
 								<Route path="purchase-orders" element={<PurchaseOrders />} />
 								<Route path="purchase-orders/new" element={<NewPurchaseOrder />} />
 								<Route path="purchase-orders/:id" element={<NewPurchaseOrder />} />
+								<Route path="approvals" element={<Approvals />} />
 								<Route
 									path="payments"
 									element={<Placeholder title="Payments" eyebrow="Procurement · finance" />}

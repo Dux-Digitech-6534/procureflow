@@ -12,11 +12,33 @@ import json
 
 import frappe
 from frappe import _
+from frappe.model.workflow import apply_workflow
 from frappe.utils import flt, nowdate
 
 MR_TYPE = "Purchase"
 MR_PENDING_STATE = "Pending Approval"
 PRIORITIES = ["Low", "Medium", "High"]
+
+# Workflow actions by (doctype, state) -> [(action, role_allowed)], matching the
+# deployed workflow fixtures. Used to surface buttons fast (without loading every
+# doc); apply_workflow() is still the authority that enforces the transition.
+MR_ACTIONS = {
+    "Pending Approval": [("Approve", "Material Request Approval"), ("Reject", "Material Request Approval")],
+    "Rejected": [("Reopen", "Material Request Approval")],
+}
+PO_ACTIONS = {
+    "Draft": [("Send for Approval", "Purchase Officer"), ("Place Order", "Purchase Officer")],
+    "Pending": [("Place Order", "PO Approver"), ("Place Order", "Purchase Officer"), ("Reject", "PO Approver")],
+}
+
+
+def _wf_actions(doctype, state, roles):
+    amap = MR_ACTIONS if doctype == "Material Request" else PO_ACTIONS
+    out = []
+    for action, role in amap.get(state or "", []):
+        if role in roles and action not in out:
+            out.append(action)
+    return out
 
 
 def _company():
@@ -187,6 +209,7 @@ def mr_list(search="", limit=100):
             limit_page_length=0,
         ):
             counts[r.parent] = counts.get(r.parent, 0) + 1
+    roles = set(frappe.get_roles())
     search = (search or "").strip().lower()
     out = []
     for r in rows:
@@ -195,6 +218,7 @@ def mr_list(search="", limit=100):
         ).lower():
             continue
         r["items"] = counts.get(r.name, 0)
+        r["actions"] = _wf_actions("Material Request", r.workflow_state, roles)
         out.append(r)
     return out
 
@@ -419,8 +443,10 @@ def po_list(limit=100):
             "Purchase Order Item", filters={"parent": ["in", names]}, fields=["parent"], limit_page_length=0
         ):
             counts[r.parent] = counts.get(r.parent, 0) + 1
+    roles = set(frappe.get_roles())
     for r in rows:
         r["items"] = counts.get(r.name, 0)
+        r["actions"] = _wf_actions("Purchase Order", r.workflow_state, roles)
     return rows
 
 
@@ -471,3 +497,59 @@ def po_detail(name):
         "taxes": taxes,
         "items": items,
     }
+
+
+# ===========================================================================
+# Approvals (workflow actions for MR + PO)
+# ===========================================================================
+
+@frappe.whitelist()
+def apply_action(doctype, name, action, remark=""):
+    if doctype not in ("Material Request", "Purchase Order"):
+        frappe.throw(_("Unsupported document type for approvals."))
+    doc = frappe.get_doc(doctype, name)
+    remark = (remark or "").strip()
+    if remark and doc.meta.has_field("custom_rejection_remark"):
+        doc.custom_rejection_remark = remark
+        doc.save()
+    # apply_workflow enforces the transition + the user's role/permission.
+    doc = apply_workflow(doc, action)
+    return {
+        "name": doc.name,
+        "workflow_state": doc.get("workflow_state"),
+        "docstatus": doc.docstatus,
+    }
+
+
+@frappe.whitelist()
+def pending_approvals():
+    """Docs awaiting THIS user's decision: MRs in Pending Approval, POs in Pending."""
+    roles = set(frappe.get_roles())
+
+    mrs = []
+    for r in frappe.get_all(
+        "Material Request",
+        filters={"material_request_type": MR_TYPE, "workflow_state": MR_PENDING_STATE},
+        fields=["name", "custom_category", "custom_select_project_", "custom_priority", "transaction_date", "owner"],
+        order_by="transaction_date asc",
+        limit_page_length=200,
+    ):
+        actions = _wf_actions("Material Request", MR_PENDING_STATE, roles)
+        if actions:
+            r["actions"] = actions
+            mrs.append(r)
+
+    pos = []
+    for r in frappe.get_all(
+        "Purchase Order",
+        filters={"workflow_state": "Pending"},
+        fields=["name", "supplier", "supplier_name", "custom_category", "custom_project_name", "grand_total", "transaction_date", "owner"],
+        order_by="transaction_date asc",
+        limit_page_length=200,
+    ):
+        actions = _wf_actions("Purchase Order", "Pending", roles)
+        if actions:
+            r["actions"] = actions
+            pos.append(r)
+
+    return {"material_requests": mrs, "purchase_orders": pos}

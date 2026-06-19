@@ -13,6 +13,8 @@ export const API = {
 	poList: 'procureflow.react_api.po_list',
 	poDetail: 'procureflow.react_api.po_detail',
 	itemGstRate: 'procureflow.purchase_tax.get_item_gst_rate',
+	applyAction: 'procureflow.react_api.apply_action',
+	pendingApprovals: 'procureflow.react_api.pending_approvals',
 } as const;
 
 export interface ProjectOption {
@@ -48,6 +50,7 @@ export interface MrListRow {
 	schedule_date: string | null;
 	owner: string;
 	items: number;
+	actions?: string[];
 }
 
 export interface MrLine {
@@ -137,6 +140,7 @@ export interface PoListRow {
 	transaction_date: string | null;
 	schedule_date: string | null;
 	items: number;
+	actions?: string[];
 }
 
 export interface PoLine {
@@ -184,4 +188,40 @@ export interface SavePoResult {
 	name: string;
 	workflow_state: string;
 	docstatus: number;
+}
+
+/* --------------------------------- Approvals -------------------------------- */
+
+export interface PendingMr {
+	name: string;
+	custom_category: string | null;
+	custom_select_project_: string | null;
+	custom_priority: string | null;
+	transaction_date: string | null;
+	owner: string;
+	actions: string[];
+}
+
+export interface PendingPo {
+	name: string;
+	supplier: string;
+	supplier_name: string | null;
+	custom_category: string | null;
+	custom_project_name: string | null;
+	grand_total: number | null;
+	transaction_date: string | null;
+	owner: string;
+	actions: string[];
+}
+
+export interface PendingApprovals {
+	material_requests: PendingMr[];
+	purchase_orders: PendingPo[];
+}
+
+/** Tone for an action button. */
+export function actionTone(action: string): 'primary' | 'danger' | 'default' {
+	if (/reject/i.test(action)) return 'danger';
+	if (/approve|place order/i.test(action)) return 'primary';
+	return 'default';
 }

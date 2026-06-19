@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { useFrappeGetCall } from 'frappe-react-sdk';
 import { API, stateTag, type MrListRow } from '../lib/api';
 import { fmtDate } from '../lib/format';
+import { ActionButtons } from '../components/ActionButtons';
 
 export function MaterialRequests() {
 	const navigate = useNavigate();
 	const [search, setSearch] = useState('');
-	const { data, isLoading, error } = useFrappeGetCall<{ message: MrListRow[] }>(API.mrList, {});
+	const { data, isLoading, error, mutate } = useFrappeGetCall<{ message: MrListRow[] }>(API.mrList, {});
 	const rows = data?.message ?? [];
 
 	const filtered = useMemo(() => {
@@ -70,6 +71,7 @@ export function MaterialRequests() {
 									<th>Priority</th>
 									<th>Required by</th>
 									<th>Status</th>
+									<th />
 								</tr>
 							</thead>
 							<tbody>
@@ -82,6 +84,11 @@ export function MaterialRequests() {
 										<td>{r.custom_priority ?? '—'}</td>
 										<td><span className="dim">{fmtDate(r.schedule_date)}</span></td>
 										<td><span className={'tag ' + stateTag(r.workflow_state)}>{r.workflow_state ?? '—'}</span></td>
+										<td style={{ textAlign: 'right' }}>
+											{r.actions?.length ? (
+												<ActionButtons doctype="Material Request" name={r.name} actions={r.actions} onDone={mutate} />
+											) : null}
+										</td>
 									</tr>
 								))}
 							</tbody>

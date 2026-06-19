@@ -2,13 +2,14 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFrappeGetCall } from 'frappe-react-sdk';
 import { API, stateTag, type PoListRow } from '../lib/api';
-import { fmtDate, fmtMoney } from '../lib/format';
+import { fmtMoney } from '../lib/format';
 import { Icon } from '../components/Icon';
+import { ActionButtons } from '../components/ActionButtons';
 
 export function PurchaseOrders() {
 	const navigate = useNavigate();
 	const [search, setSearch] = useState('');
-	const { data, isLoading, error } = useFrappeGetCall<{ message: PoListRow[] }>(API.poList, {});
+	const { data, isLoading, error, mutate } = useFrappeGetCall<{ message: PoListRow[] }>(API.poList, {});
 	const rows = data?.message ?? [];
 
 	const filtered = useMemo(() => {
@@ -70,6 +71,7 @@ export function PurchaseOrders() {
 									<th>Items</th>
 									<th style={{ textAlign: 'right' }}>Grand total</th>
 									<th>Status</th>
+									<th />
 								</tr>
 							</thead>
 							<tbody>
@@ -81,6 +83,11 @@ export function PurchaseOrders() {
 										<td><span className="num">{r.items}</span></td>
 										<td style={{ textAlign: 'right' }}><span className="num">{fmtMoney(r.grand_total, 'INR')}</span></td>
 										<td><span className={'tag ' + stateTag(r.workflow_state)}>{r.workflow_state ?? '—'}</span></td>
+										<td style={{ textAlign: 'right' }}>
+											{r.actions?.length ? (
+												<ActionButtons doctype="Purchase Order" name={r.name} actions={r.actions} onDone={mutate} />
+											) : null}
+										</td>
 									</tr>
 								))}
 							</tbody>
