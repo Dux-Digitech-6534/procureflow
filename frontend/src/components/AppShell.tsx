@@ -30,7 +30,7 @@ export function AppShell() {
 		<div className="layout">
 			<aside className="sidebar">
 				<div className="brand">
-					<img className="cologo" src={COMPANY_LOGO} alt="Sanskruti" style={{ maxHeight: 34 }} />
+					<img className="cologo" src={COMPANY_LOGO} alt="Sanskruti" style={{ maxHeight: 52, width: 'auto' }} />
 					<div className="btext">
 						<div className="nm">
 							Procure<em>Flow</em>

@@ -314,7 +314,10 @@ export function NewMaterialRequest() {
 								</Field>
 							</div>
 							<div className="span2">
-								<Field label="Attachment" hint="PO / indent scan, drawing — header level only">
+								{/* NOT a <label> on purpose: a label wrapping a hidden file input fires
+								    the picker natively too, which double-triggers / leaks to the next click. */}
+								<div className="field">
+									<span className="flabel">Attachment</span>
 									<input
 										ref={fileRef}
 										type="file"
@@ -350,7 +353,8 @@ export function NewMaterialRequest() {
 											)}
 										</div>
 									</div>
-								</Field>
+									<span className="fhint">PO / indent scan, drawing — header level only</span>
+								</div>
 							</div>
 						</div>
 					</section>
@@ -392,7 +396,7 @@ export function NewMaterialRequest() {
 									<span className="ix">{i + 1}</span>
 									<div className="iname">
 										<div className="t1">{l.item_name}</div>
-										<div className="t2">{l.item_code}</div>
+										{l.item_code !== l.item_name && <div className="t2">{l.item_code}</div>}
 									</div>
 									<span>
 										{l.sub_category ? (
