@@ -15,6 +15,13 @@ export const API = {
 	itemGstRate: 'procureflow.purchase_tax.get_item_gst_rate',
 	applyAction: 'procureflow.react_api.apply_action',
 	pendingApprovals: 'procureflow.react_api.pending_approvals',
+	receivablePos: 'procureflow.react_api.receivable_pos',
+	poReceiptItems: 'procureflow.react_api.po_receipt_items',
+	createReceipt: 'procureflow.react_api.create_receipt',
+	prList: 'procureflow.react_api.pr_list',
+	prDetail: 'procureflow.react_api.pr_detail',
+	savePayment: 'procureflow.react_api.save_payment',
+	paymentList: 'procureflow.react_api.payment_list',
 } as const;
 
 export interface ProjectOption {
@@ -224,4 +231,72 @@ export function actionTone(action: string): 'primary' | 'danger' | 'default' {
 	if (/reject/i.test(action)) return 'danger';
 	if (/approve|place order/i.test(action)) return 'primary';
 	return 'default';
+}
+
+/* --------------------------- Receipts & Payments ---------------------------- */
+
+export interface ReceivablePo {
+	name: string;
+	supplier: string;
+	supplier_name: string | null;
+	custom_project_name: string | null;
+	grand_total: number | null;
+	transaction_date: string | null;
+}
+
+export interface PoReceiptItem {
+	po_item: string;
+	item_code: string;
+	item_name: string;
+	uom: string;
+	ordered: number;
+	received: number;
+	pending: number;
+}
+
+export interface PoReceiptItems {
+	supplier: string;
+	supplier_name: string | null;
+	project: string | null;
+	items: PoReceiptItem[];
+}
+
+export interface PrListRow {
+	name: string;
+	supplier: string;
+	supplier_name: string | null;
+	custom_project_name: string | null;
+	grand_total: number | null;
+	posting_date: string | null;
+	custom_payment_status: string | null;
+	total: number;
+	paid: number;
+	outstanding: number;
+}
+
+export interface PaymentDefaults {
+	purchase_receipt: string;
+	supplier: string;
+	project: string | null;
+	company: string | null;
+	previous_paid_amount: number;
+	outstanding_amount: number;
+	amount: number;
+	payment_date: string;
+}
+
+export interface PaymentListRow {
+	name: string;
+	purchase_receipt: string;
+	supplier: string;
+	project: string | null;
+	amount: number;
+	payment_date: string | null;
+}
+
+/** Tone for a payment status. */
+export function payTone(status: string | null | undefined): 'ok' | 'pend' | 'err' {
+	if (status === 'Fully Paid') return 'ok';
+	if (status === 'Partially Paid') return 'pend';
+	return 'err';
 }

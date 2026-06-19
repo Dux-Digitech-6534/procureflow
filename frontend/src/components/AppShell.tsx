@@ -7,6 +7,7 @@ import { useTheme } from '../lib/theme';
 const NAV: { to: string; label: string; icon: IconName }[] = [
 	{ to: '/material-requests', label: 'Material requests', icon: 'file-text' },
 	{ to: '/purchase-orders', label: 'Purchase orders', icon: 'cube' },
+	{ to: '/receipts', label: 'Receipts', icon: 'package' },
 	{ to: '/approvals', label: 'Approvals', icon: 'shield-check' },
 	{ to: '/payments', label: 'Payments', icon: 'banknote' },
 ];

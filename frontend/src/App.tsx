@@ -8,6 +8,9 @@ import { NewMaterialRequest } from './pages/NewMaterialRequest';
 import { PurchaseOrders } from './pages/PurchaseOrders';
 import { NewPurchaseOrder } from './pages/NewPurchaseOrder';
 import { Approvals } from './pages/Approvals';
+import { Receipts } from './pages/Receipts';
+import { NewReceipt } from './pages/NewReceipt';
+import { Payments } from './pages/Payments';
 import { Settings } from './pages/Settings';
 import { Placeholder } from './pages/Placeholder';
 
@@ -38,10 +41,9 @@ export default function App() {
 								<Route path="purchase-orders/new" element={<NewPurchaseOrder />} />
 								<Route path="purchase-orders/:id" element={<NewPurchaseOrder />} />
 								<Route path="approvals" element={<Approvals />} />
-								<Route
-									path="payments"
-									element={<Placeholder title="Payments" eyebrow="Procurement · finance" />}
-								/>
+								<Route path="receipts" element={<Receipts />} />
+								<Route path="receipts/new" element={<NewReceipt />} />
+								<Route path="payments" element={<Payments />} />
 								<Route path="settings" element={<Settings />} />
 								<Route path="*" element={<Placeholder title="Not found" eyebrow="404" />} />
 							</Route>

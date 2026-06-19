@@ -547,3 +547,160 @@ def pending_approvals():
             pos.append(r)
 
     return {"material_requests": mrs, "purchase_orders": pos}
+
+
+# ===========================================================================
+# Purchase Receipt (GRN) + Payment
+# ===========================================================================
+
+def _pr_pay_info(name):
+    from procureflow.procure_flow.doctype.procureflow_payment_entry.procureflow_payment_entry import (
+        get_purchase_receipt_total,
+        get_submitted_paid_amount,
+    )
+
+    total = flt(get_purchase_receipt_total(name))
+    paid = flt(get_submitted_paid_amount(name))
+    return {"total": total, "paid": paid, "outstanding": max(total - paid, 0)}
+
+
+@frappe.whitelist()
+def receivable_pos():
+    """Approved POs that still have quantity left to receive."""
+    return frappe.get_all(
+        "Purchase Order",
+        filters={"docstatus": 1, "per_received": ["<", 100], "status": ["not in", ["Closed"]]},
+        fields=["name", "supplier", "supplier_name", "custom_project_name", "grand_total", "transaction_date"],
+        order_by="transaction_date desc",
+        limit_page_length=100,
+    )
+
+
+@frappe.whitelist()
+def po_receipt_items(purchase_order):
+    doc = frappe.get_doc("Purchase Order", purchase_order)
+    doc.check_permission("read")
+    items = []
+    for it in doc.items:
+        pending = flt(it.qty) - flt(it.received_qty)
+        if pending > 0:
+            items.append(
+                {
+                    "po_item": it.name,
+                    "item_code": it.item_code,
+                    "item_name": it.item_name,
+                    "uom": it.uom,
+                    "ordered": it.qty,
+                    "received": it.received_qty,
+                    "pending": pending,
+                }
+            )
+    return {"supplier": doc.supplier, "supplier_name": doc.supplier_name, "project": doc.custom_project_name, "items": items}
+
+
+@frappe.whitelist()
+def create_receipt(data):
+    """Create + submit a Purchase Receipt from a PO with the entered received qtys."""
+    from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_receipt
+
+    data = _loads(data)
+    po = data.get("purchase_order")
+    if not po:
+        frappe.throw(_("Select a purchase order."))
+
+    qty_map = {r["po_item"]: flt(r.get("qty")) for r in data.get("items", []) if r.get("po_item")}
+    pr = make_purchase_receipt(po)
+    default_wh = pr.get("set_warehouse") or frappe.db.get_value("Purchase Order", po, "set_warehouse")
+
+    keep = []
+    for it in pr.items:
+        q = qty_map.get(it.purchase_order_item, it.qty)
+        if flt(q) > 0:
+            it.qty = flt(q)
+            if not it.warehouse:
+                it.warehouse = default_wh
+            keep.append(it)
+    pr.set("items", keep)
+    if not pr.get("items"):
+        frappe.throw(_("Nothing to receive — enter a received quantity."))
+
+    pr.insert()
+    pr.submit()
+    return {"name": pr.name}
+
+
+@frappe.whitelist()
+def pr_list(limit=100):
+    rows = frappe.get_all(
+        "Purchase Receipt",
+        filters={"docstatus": 1},
+        fields=[
+            "name", "supplier", "supplier_name", "custom_project_name",
+            "grand_total", "posting_date", "custom_payment_status",
+        ],
+        order_by="posting_date desc, modified desc",
+        limit_page_length=int(limit),
+    )
+    for r in rows:
+        info = _pr_pay_info(r.name)
+        r["total"] = info["total"]
+        r["paid"] = info["paid"]
+        r["outstanding"] = info["outstanding"]
+    return rows
+
+
+@frappe.whitelist()
+def pr_detail(name):
+    doc = frappe.get_doc("Purchase Receipt", name)
+    doc.check_permission("read")
+    info = _pr_pay_info(name)
+    return {
+        "name": doc.name,
+        "supplier": doc.supplier,
+        "supplier_name": doc.supplier_name,
+        "project": doc.get("custom_project_name"),
+        "posting_date": doc.posting_date,
+        "grand_total": doc.grand_total,
+        "payment_status": doc.get("custom_payment_status"),
+        "total": info["total"],
+        "paid": info["paid"],
+        "outstanding": info["outstanding"],
+        "items": [
+            {"item_code": it.item_code, "item_name": it.item_name, "qty": it.qty, "uom": it.uom, "rate": it.rate, "amount": it.amount}
+            for it in doc.items
+        ],
+    }
+
+
+@frappe.whitelist()
+def payment_defaults(purchase_receipt):
+    from procureflow.api import get_procureflow_payment_entry_defaults
+
+    return get_procureflow_payment_entry_defaults(purchase_receipt)
+
+
+@frappe.whitelist()
+def save_payment(data):
+    data = _loads(data)
+    pr = data.get("purchase_receipt")
+    if not pr:
+        frappe.throw(_("Select a purchase receipt."))
+    doc = frappe.new_doc("Procureflow Payment Entry")
+    doc.purchase_receipt = pr
+    doc.payment_date = data.get("payment_date") or nowdate()
+    doc.amount = flt(data.get("amount"))
+    doc.remark = data.get("remark")
+    doc.insert()  # validate fills supplier/project/company + outstanding
+    doc.submit()  # stamps the PR payment status
+    return {"name": doc.name}
+
+
+@frappe.whitelist()
+def payment_list(limit=100):
+    return frappe.get_all(
+        "Procureflow Payment Entry",
+        filters={"docstatus": 1},
+        fields=["name", "purchase_receipt", "supplier", "project", "amount", "payment_date"],
+        order_by="payment_date desc, modified desc",
+        limit_page_length=int(limit),
+    )
