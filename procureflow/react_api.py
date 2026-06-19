@@ -296,6 +296,9 @@ def mr_detail(name):
 
 PO_DRAFT_STATE = "Draft"
 TAX_TYPES = ["Intra-State (CGST + SGST)", "Inter-State (IGST)"]
+# Custom ERPNext print format for the PO (carries the company-linked signature
+# set by the before_submit hook in signature_api). Used by the SPA's Print button.
+PO_PRINT_FORMAT = "Sanskruti PO Print Format"
 
 
 @frappe.whitelist()
@@ -329,10 +332,17 @@ def party_tax_type(supplier):
 
 @frappe.whitelist()
 def approved_material_requests():
-    """Approved (submitted) Purchase MRs available to order against."""
+    """Approved (submitted) Purchase MRs that still have quantity left to order.
+    Excludes fully-ordered MRs (per_ordered >= 100, status "Ordered") so an MR
+    whose every line has been put on a PO disappears from the picker."""
     rows = frappe.get_all(
         "Material Request",
-        filters={"material_request_type": MR_TYPE, "docstatus": 1, "status": ["!=", "Stopped"]},
+        filters={
+            "material_request_type": MR_TYPE,
+            "docstatus": 1,
+            "status": ["not in", ["Stopped", "Ordered"]],
+            "per_ordered": ["<", 100],
+        },
         fields=["name", "custom_category", "custom_select_project_", "transaction_date", "schedule_date"],
         order_by="transaction_date desc",
         limit_page_length=100,
@@ -530,6 +540,7 @@ def po_detail(name):
         "grand_total": doc.grand_total,
         "taxes": taxes,
         "items": items,
+        "print_format": PO_PRINT_FORMAT,
         **_doc_action_state(doc),
     }
 
@@ -687,6 +698,16 @@ def create_receipt(data):
     qty_map = {r["po_item"]: flt(r.get("qty")) for r in data.get("items", []) if r.get("po_item")}
     pr = make_purchase_receipt(po)
     default_wh = pr.get("set_warehouse") or frappe.db.get_value("Purchase Order", po, "set_warehouse")
+
+    # Receipt header fields from the form (posting/receipt date, supplier's
+    # delivery-note ref, remark). posting_date drives the stock posting date.
+    if data.get("posting_date"):
+        pr.set_posting_time = 1
+        pr.posting_date = data.get("posting_date")
+    if data.get("supplier_delivery_note"):
+        pr.supplier_delivery_note = data.get("supplier_delivery_note")
+    if data.get("remark") and pr.meta.has_field("custom_remark"):
+        pr.custom_remark = data.get("remark")
 
     keep = []
     for it in pr.items:

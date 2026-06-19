@@ -198,6 +198,7 @@ export interface PoDetail extends DocActionState {
 	grand_total: number;
 	taxes: PoTaxRow[];
 	items: PoLine[];
+	print_format: string | null;
 }
 
 export interface SavePoResult {

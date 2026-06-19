@@ -270,6 +270,18 @@ export function NewPurchaseOrder() {
 		}
 	}
 
+	// Open the ERPNext print format (carries the company-linked signature set on
+	// submit) in a new tab — same-origin, so the logged-in session applies.
+	function printPo() {
+		if (!detail) return;
+		const fmt = detail.print_format || 'Sanskruti PO Print Format';
+		const url =
+			`/printview?doctype=${encodeURIComponent('Purchase Order')}` +
+			`&name=${encodeURIComponent(detail.name)}` +
+			`&format=${encodeURIComponent(fmt)}&trigger_print=1&no_letterhead=0`;
+		window.open(url, '_blank', 'noopener');
+	}
+
 	return (
 		<main>
 			<div className="crumb">
@@ -292,6 +304,11 @@ export function NewPurchaseOrder() {
 					)}
 				</div>
 				<div className="spacer" />
+				{isEdit && detail && (
+					<button className="btn" onClick={printPo} title="Open the purchase order print format in a new tab">
+						<Icon name="file-text" size={15} /> Print
+					</button>
+				)}
 				{editable && (
 					<>
 						<button className="btn" disabled={saving} onClick={() => save(false)}>
@@ -337,6 +354,26 @@ export function NewPurchaseOrder() {
 						<span className="ttl">Order details</span>
 					</div>
 					<div className="formgrid">
+						{!readOnly && (
+							<div className="span2">
+								<Field
+									label="Start from a material request"
+									hint="Pull an approved MR's items, project & category in one step — or build the order from scratch below. Optional."
+								>
+									<SearchSelect
+										value={''}
+										onChange={pullFromMr}
+										placeholder={approvedMrs.length ? 'Pick an approved material request…' : 'No material requests pending order'}
+										disabled={approvedMrs.length === 0}
+										options={approvedMrs.map((m) => ({
+											value: m.name,
+											label: m.name,
+											sub: [m.custom_category, m.custom_select_project_].filter(Boolean).join(' · '),
+										}))}
+									/>
+								</Field>
+							</div>
+						)}
 						<Field label="Supplier" required>
 							<SearchSelect
 								value={supplier}
@@ -415,28 +452,14 @@ export function NewPurchaseOrder() {
 						<span className="cnt">{lines.length}</span>
 					</div>
 					{!readOnly && (
-						<div className="addwrap" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+						<div className="addwrap">
 							<div className="field">
-								<span className="flabel">Get items from material request</span>
-								<SearchSelect
-									value={''}
-									onChange={pullFromMr}
-									placeholder={approvedMrs.length ? 'Pick an approved MR…' : 'No approved MRs yet'}
-									disabled={approvedMrs.length === 0}
-									options={approvedMrs.map((m) => ({
-										value: m.name,
-										label: m.name,
-										sub: [m.custom_category, m.custom_select_project_].filter(Boolean).join(' · '),
-									}))}
-								/>
-							</div>
-							<div className="field">
-								<span className="flabel">Or add an item by category</span>
+								<span className="flabel">Add an item by category</span>
 								<SearchSelect
 									value={''}
 									onChange={addByCategory}
 									disabled={!category}
-									placeholder={category ? 'Search and add an item…' : 'Pick a category first'}
+									placeholder={category ? 'Search and add an item…' : 'Pick a category (or pull a material request) first'}
 									options={pickerOptions}
 								/>
 							</div>

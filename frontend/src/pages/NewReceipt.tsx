@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import { API, type PoReceiptItems, type ReceivablePo } from '../lib/api';
-import { Field, SearchSelect } from '../components/form';
+import { Field, SearchSelect, TextArea } from '../components/form';
 import { Icon } from '../components/Icon';
 import { fmtMoney, parseServerError } from '../lib/format';
 
@@ -16,12 +16,22 @@ interface Line {
 	qty: string;
 }
 
+/** Local YYYY-MM-DD (avoids the UTC drift of toISOString near midnight). */
+function todayStr(): string {
+	const d = new Date();
+	const z = (n: number) => String(n).padStart(2, '0');
+	return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
+}
+
 export function NewReceipt() {
 	const navigate = useNavigate();
 	const posRes = useFrappeGetCall<{ message: ReceivablePo[] }>(API.receivablePos, {});
 	const pos = posRes.data?.message ?? [];
 	const [po, setPo] = useState('');
 	const [lines, setLines] = useState<Line[]>([]);
+	const [postingDate, setPostingDate] = useState(todayStr());
+	const [deliveryNote, setDeliveryNote] = useState('');
+	const [remark, setRemark] = useState('');
 	const [err, setErr] = useState('');
 
 	const itemsRes = useFrappeGetCall<{ message: PoReceiptItems }>(
@@ -50,6 +60,12 @@ export function NewReceipt() {
 
 	const meta = useMemo(() => pos.find((p) => p.name === po), [pos, po]);
 
+	// A receipt's posting date can't precede the PO date — bump the default up.
+	useEffect(() => {
+		if (meta?.transaction_date && postingDate < meta.transaction_date) setPostingDate(meta.transaction_date);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [meta?.transaction_date]);
+
 	function setQty(i: number, v: string) {
 		setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, qty: v } : l)));
 	}
@@ -57,6 +73,7 @@ export function NewReceipt() {
 	async function save() {
 		setErr('');
 		if (!po) return setErr('Pick a purchase order.');
+		if (!postingDate) return setErr('Pick a receipt date.');
 		const items = lines
 			.map((l) => ({ po_item: l.po_item, qty: Number(l.qty) || 0 }))
 			.filter((l) => l.qty > 0);
@@ -64,7 +81,15 @@ export function NewReceipt() {
 		if (lines.some((l) => Number(l.qty) > l.pending))
 			return setErr('Received quantity cannot exceed the pending quantity.');
 		try {
-			const res = await createReceipt({ data: { purchase_order: po, items } });
+			const res = await createReceipt({
+				data: {
+					purchase_order: po,
+					posting_date: postingDate,
+					supplier_delivery_note: deliveryNote || null,
+					remark: remark || null,
+					items,
+				},
+			});
 			navigate('/receipts');
 			void res;
 		} catch (e) {
@@ -106,16 +131,25 @@ export function NewReceipt() {
 						<span className="ttl">Against purchase order</span>
 					</div>
 					<div className="formgrid">
-						<Field label="Purchase order" required hint="Approved orders with quantity left to receive.">
+						<Field label="Purchase order" required hint="Submitted orders with quantity left to receive.">
 							<SearchSelect
 								value={po}
 								onChange={setPo}
-								placeholder={pos.length ? 'Select an approved PO…' : 'No receivable POs'}
+								placeholder={pos.length ? 'Select a purchase order…' : 'No receivable POs'}
 								options={pos.map((p) => ({
 									value: p.name,
 									label: p.name,
 									sub: [p.supplier_name ?? p.supplier, p.custom_project_name].filter(Boolean).join(' · '),
 								}))}
+							/>
+						</Field>
+						<Field label="Receipt date" required hint="Cannot be before the purchase order date.">
+							<input
+								className="inp mono"
+								type="date"
+								value={postingDate}
+								min={meta?.transaction_date ?? undefined}
+								onChange={(e) => setPostingDate(e.target.value)}
 							/>
 						</Field>
 						<Field label="Supplier">
@@ -127,6 +161,14 @@ export function NewReceipt() {
 						<Field label="PO grand total">
 							<input className="inp mono" disabled value={meta ? fmtMoney(meta.grand_total, 'INR') : '—'} />
 						</Field>
+						<Field label="Supplier delivery note" hint="Supplier's challan / DN reference.">
+							<input className="inp" value={deliveryNote} onChange={(e) => setDeliveryNote(e.target.value)} placeholder="e.g. DN-00123" />
+						</Field>
+						<div className="span2">
+							<Field label="Remark">
+								<TextArea value={remark} onChange={setRemark} rows={2} placeholder="Note for this receipt…" />
+							</Field>
+						</div>
 					</div>
 				</section>
 
