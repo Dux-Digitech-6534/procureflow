@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useFrappeGetCall } from 'frappe-react-sdk';
-import { API, stateTag, type MrListRow } from '../lib/api';
+import { API, mrDisplayStatus, type MrListRow } from '../lib/api';
 import { fmtDate } from '../lib/format';
 import { Icon } from '../components/Icon';
 import { ActionButtons } from '../components/ActionButtons';
@@ -20,7 +20,15 @@ export function MaterialRequests() {
 		{ key: 'items', header: 'Items', sortValue: (r) => r.items, render: (r) => <span className="num">{r.items}</span> },
 		{ key: 'priority', header: 'Priority', sortValue: (r) => PRIORITY_RANK[r.custom_priority ?? ''] ?? 0, render: (r) => r.custom_priority ?? '—' },
 		{ key: 'date', header: 'Required by', sortValue: (r) => r.schedule_date, render: (r) => <span className="dim">{fmtDate(r.schedule_date)}</span> },
-		{ key: 'status', header: 'Status', sortValue: (r) => r.workflow_state, render: (r) => <span className={'tag ' + stateTag(r.workflow_state)}>{r.workflow_state ?? '—'}</span> },
+		{
+			key: 'status',
+			header: 'Status',
+			sortValue: (r) => mrDisplayStatus(r).label,
+			render: (r) => {
+				const s = mrDisplayStatus(r);
+				return <span className={'tag ' + s.tone}>{s.label}</span>;
+			},
+		},
 		{
 			key: 'actions',
 			header: '',
@@ -30,7 +38,7 @@ export function MaterialRequests() {
 	];
 
 	const filters: Filter<MrListRow>[] = [
-		{ type: 'select', key: 'status', label: 'Status', value: (r) => r.workflow_state },
+		{ type: 'select', key: 'status', label: 'Status', value: (r) => mrDisplayStatus(r).label },
 		{ type: 'select', key: 'category', label: 'Category', value: (r) => r.custom_category },
 		{ type: 'select', key: 'project', label: 'Project', value: (r) => r.custom_select_project_ },
 		{ type: 'select', key: 'priority', label: 'Priority', value: (r) => r.custom_priority },

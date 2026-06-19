@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useFrappeGetCall } from 'frappe-react-sdk';
-import { API, stateTag, type PoListRow } from '../lib/api';
+import { API, poDisplayStatus, type PoListRow } from '../lib/api';
 import { fmtDate, fmtMoney } from '../lib/format';
 import { Icon } from '../components/Icon';
 import { ActionButtons } from '../components/ActionButtons';
@@ -18,7 +18,15 @@ export function PurchaseOrders() {
 		{ key: 'items', header: 'Items', sortValue: (r) => r.items, render: (r) => <span className="num">{r.items}</span> },
 		{ key: 'date', header: 'Date', sortValue: (r) => r.transaction_date, render: (r) => <span className="dim">{fmtDate(r.transaction_date)}</span> },
 		{ key: 'total', header: 'Grand total', align: 'right', sortValue: (r) => r.grand_total ?? 0, render: (r) => <span className="num">{fmtMoney(r.grand_total, 'INR')}</span> },
-		{ key: 'status', header: 'Status', sortValue: (r) => r.workflow_state, render: (r) => <span className={'tag ' + stateTag(r.workflow_state)}>{r.workflow_state ?? '—'}</span> },
+		{
+			key: 'status',
+			header: 'Status',
+			sortValue: (r) => poDisplayStatus(r).label,
+			render: (r) => {
+				const s = poDisplayStatus(r);
+				return <span className={'tag ' + s.tone}>{s.label}</span>;
+			},
+		},
 		{
 			key: 'actions',
 			header: '',
@@ -28,7 +36,7 @@ export function PurchaseOrders() {
 	];
 
 	const filters: Filter<PoListRow>[] = [
-		{ type: 'select', key: 'status', label: 'Status', value: (r) => r.workflow_state },
+		{ type: 'select', key: 'status', label: 'Status', value: (r) => poDisplayStatus(r).label },
 		{ type: 'select', key: 'supplier', label: 'Supplier', value: (r) => r.supplier_name ?? r.supplier },
 		{ type: 'select', key: 'project', label: 'Project', value: (r) => r.custom_project_name },
 		{ type: 'select', key: 'category', label: 'Category', value: (r) => r.custom_category },

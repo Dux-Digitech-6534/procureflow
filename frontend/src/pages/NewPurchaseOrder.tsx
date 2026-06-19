@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import {
 	API,
-	stateTag,
+	poDisplayStatus,
 	type ApprovedMr,
 	type ItemOption,
 	type PoContext,
@@ -320,9 +320,9 @@ export function NewPurchaseOrder() {
 					<h1 style={{ color: 'var(--fg-1)', fontFamily: 'var(--font-ui)' }}>
 						{isEdit ? 'Purchase order' : 'New purchase order'}
 					</h1>
-					{detail?.workflow_state && (
+					{detail && (
 						<div style={{ marginTop: 8 }}>
-							<span className={'tag ' + stateTag(detail.workflow_state)}>{detail.workflow_state}</span>
+							<span className={'tag ' + poDisplayStatus(detail).tone}>{poDisplayStatus(detail).label}</span>
 						</div>
 					)}
 				</div>

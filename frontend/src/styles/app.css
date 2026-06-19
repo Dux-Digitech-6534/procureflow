@@ -162,6 +162,7 @@ h1 em { font-style: normal; background: var(--brand-grad); -webkit-background-cl
 .tag.ok { color: var(--ok); background: var(--ok-bg) }
 .tag.pend { color: var(--pending); background: var(--pending-bg) }
 .tag.err { color: var(--err); background: var(--err-bg) }
+.tag.neutral { color: var(--fg-3); background: var(--surface-3) }
 
 /* alert strip */
 .alert {

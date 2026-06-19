@@ -8,7 +8,7 @@ import {
 } from 'frappe-react-sdk';
 import {
 	API,
-	stateTag,
+	mrDisplayStatus,
 	type MrContext,
 	type ItemOption,
 	type MrDetail,
@@ -228,9 +228,9 @@ export function NewMaterialRequest() {
 					<h1 style={{ color: 'var(--fg-1)', fontFamily: 'var(--font-ui)' }}>
 						{isEdit ? 'Material request' : 'New material request'}
 					</h1>
-					{detail?.workflow_state && (
+					{detail && (
 						<div style={{ marginTop: 8 }}>
-							<span className={'tag ' + stateTag(detail.workflow_state)}>{detail.workflow_state}</span>
+							<span className={'tag ' + mrDisplayStatus(detail).tone}>{mrDisplayStatus(detail).label}</span>
 						</div>
 					)}
 				</div>

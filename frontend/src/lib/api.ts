@@ -55,6 +55,7 @@ export interface MrListRow {
 	custom_priority: string | null;
 	workflow_state: string | null;
 	status: string | null;
+	docstatus: number;
 	transaction_date: string | null;
 	schedule_date: string | null;
 	owner: string;
@@ -89,6 +90,7 @@ export interface MrDetail extends DocActionState {
 	schedule_date: string | null;
 	remark: string | null;
 	workflow_state: string | null;
+	status: string | null;
 	docstatus: number;
 	owner: string;
 	attachment: string | null;
@@ -102,11 +104,68 @@ export interface SaveMrResult {
 	docstatus: number;
 }
 
-/** Map a workflow_state to a DUX status-tag class. */
-export function stateTag(state: string | null | undefined): 'ok' | 'pend' | 'err' {
-	if (state === 'Approved') return 'ok';
-	if (state === 'Rejected') return 'err';
-	return 'pend';
+export type Tone = 'ok' | 'pend' | 'err' | 'neutral';
+export interface DisplayStatus {
+	label: string;
+	tone: Tone;
+}
+
+/**
+ * Refined Purchase Order status. This system never raises invoices (no
+ * Purchase Invoice → per_billed is always 0), so ERPNext's billing-based
+ * states ("To Receive and Bill" / "To Bill") are meaningless here. We show the
+ * approval phase from workflow_state, then once submitted derive purely from
+ * how much has been RECEIVED.
+ */
+export function poDisplayStatus(r: {
+	workflow_state?: string | null;
+	status?: string | null;
+	docstatus?: number;
+	per_received?: number | null;
+}): DisplayStatus {
+	if (r.docstatus === 2 || r.status === 'Cancelled') return { label: 'Cancelled', tone: 'err' };
+	if (r.status === 'On Hold') return { label: 'On Hold', tone: 'neutral' };
+	if (r.status === 'Closed') return { label: 'Closed', tone: 'neutral' };
+	if (r.docstatus === 1) {
+		const pr = r.per_received ?? 0;
+		if (pr >= 100) return { label: 'Received', tone: 'ok' };
+		if (pr > 0) return { label: 'Partially received', tone: 'pend' };
+		return { label: 'Ordered', tone: 'pend' };
+	}
+	if (r.workflow_state === 'Rejected') return { label: 'Rejected', tone: 'err' };
+	if (r.workflow_state === 'Pending') return { label: 'Pending approval', tone: 'pend' };
+	return { label: 'Draft', tone: 'neutral' };
+}
+
+/**
+ * Refined Material Request status. The MR axis (per_ordered / per_received)
+ * has nothing to do with billing, so we use ERPNext's status directly once
+ * approved — only relabelling its "Pending" (= approved, nothing ordered yet)
+ * to "Approved" so it doesn't clash with the approval-phase "Pending approval".
+ */
+export function mrDisplayStatus(r: {
+	workflow_state?: string | null;
+	status?: string | null;
+	docstatus?: number;
+}): DisplayStatus {
+	if (r.docstatus === 2 || r.status === 'Cancelled') return { label: 'Cancelled', tone: 'err' };
+	if (r.status === 'Stopped') return { label: 'Stopped', tone: 'neutral' };
+	if (r.docstatus === 1) {
+		switch (r.status) {
+			case 'Received':
+				return { label: 'Received', tone: 'ok' };
+			case 'Partially Received':
+				return { label: 'Partially received', tone: 'pend' };
+			case 'Ordered':
+				return { label: 'Ordered', tone: 'pend' };
+			case 'Partially Ordered':
+				return { label: 'Partially ordered', tone: 'pend' };
+			default: // "Pending" = approved, nothing ordered yet
+				return { label: 'Approved', tone: 'pend' };
+		}
+	}
+	if (r.workflow_state === 'Rejected') return { label: 'Rejected', tone: 'err' };
+	return { label: 'Pending approval', tone: 'pend' };
 }
 
 /* ------------------------------- Purchase Order ----------------------------- */
@@ -153,6 +212,8 @@ export interface PoListRow {
 	custom_project_name: string | null;
 	workflow_state: string | null;
 	status: string | null;
+	docstatus: number;
+	per_received: number | null;
 	grand_total: number | null;
 	transaction_date: string | null;
 	schedule_date: string | null;
@@ -192,6 +253,8 @@ export interface PoDetail extends DocActionState {
 	remark: string | null;
 	schedule_date: string | null;
 	workflow_state: string | null;
+	status: string | null;
+	per_received: number | null;
 	docstatus: number;
 	attachment: string | null;
 	net_total: number;
