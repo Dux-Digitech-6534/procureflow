@@ -371,7 +371,8 @@ export function NewPurchaseOrder() {
 				</div>
 			)}
 
-			<div className="stack">
+			<div className="grid">
+				<div className="stack">
 				<section className="card accent">
 					<div className="chead">
 						<Icon name="cube" size={16} />
@@ -544,10 +545,10 @@ export function NewPurchaseOrder() {
 						</div>
 					))}
 				</section>
+				</div>
 
-					{isEdit && detail && <LinkedDocs doctype="Purchase Order" name={detail.name} />}
-
-					<section className="card" style={{ maxWidth: 460, marginLeft: 'auto', width: '100%' }}>
+				<div className="stack">
+					<section className="card">
 						<div className="chead">
 							<Icon name="rupee" size={16} />
 							<span className="ttl">Tax breakdown</span>
@@ -575,6 +576,9 @@ export function NewPurchaseOrder() {
 						</div>
 					</div>
 				</section>
+
+					{isEdit && detail && <LinkedDocs doctype="Purchase Order" name={detail.name} />}
+				</div>
 			</div>
 		</main>
 	);
