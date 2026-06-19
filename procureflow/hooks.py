@@ -6,6 +6,24 @@ app_email = "nandkishor.kochkar@duxdigitech.com"
 app_license = "mit"
 
 
+# ---------------------------------------------------------------------------
+# ProcureFlow React SPA — a separate front-door served at /procureflow.
+# Additive only: this does NOT modify the existing desk UI/backend. The SPA is
+# built by frontend/ (vite) into procureflow/public/frontend + www/procureflow.html;
+# its endpoints live in procureflow/react_api.py.
+# ---------------------------------------------------------------------------
+website_route_rules = [
+    {"from_route": "/procureflow/<path:app_path>", "to_route": "procureflow"},
+]
+
+add_to_apps_screen = [
+    {
+        "name": "procureflow",
+        "title": "ProcureFlow",
+        "route": "/procureflow",
+    },
+]
+
 
 doctype_js = {
     "Material Request": "public/js/material_request.js",

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>ProcureFlow · DUX Digitech</title>
+		<script type="module" crossorigin src="/assets/procureflow/frontend/assets/index-DdhGcsZU.js"></script>
+		<link rel="stylesheet" crossorigin href="/assets/procureflow/frontend/assets/index-DOLsx1hK.css">
+	</head>
+	<body>
+		<div id="root"></div>
+		<script>
+			window.csrf_token = '{{ csrf_token }}';
+			// Pre-paint theme restore — avoids a light-theme flash for dark users
+			try {
+				if (localStorage.getItem('procureflow:theme') === 'dark') {
+					document.documentElement.dataset.theme = 'dark';
+				}
+			} catch (e) {}
+		</script>
+	</body>
+</html>
