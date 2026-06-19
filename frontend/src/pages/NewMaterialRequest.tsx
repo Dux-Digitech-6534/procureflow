@@ -17,6 +17,7 @@ import {
 import { Field, SelectInput, SearchSelect, TextArea } from '../components/form';
 import { Icon } from '../components/Icon';
 import { DocLifecycleActions } from '../components/DocLifecycleActions';
+import { LinkedDocs } from '../components/LinkedDocs';
 import { parseServerError } from '../lib/format';
 
 interface LineRow {
@@ -527,6 +528,8 @@ export function NewMaterialRequest() {
 							</div>
 						</div>
 					</section>
+
+					{isEdit && detail && <LinkedDocs doctype="Material Request" name={detail.name} />}
 
 					<section className="card twk">
 						<div className="chead">

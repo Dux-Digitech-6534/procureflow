@@ -1,5 +1,28 @@
 /* ProcureFlow page-specific components — built on the DUX tokens. */
 
+/* Linked-documents panel: per-type group header above the .lrow list. */
+.lgroup-h {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	padding: 11px 18px 7px;
+	font-size: 10.5px;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: var(--fg-3);
+	background: var(--th-bg);
+	border-bottom: 1px solid var(--hairline);
+}
+.lgroup-h svg {
+	color: var(--fg-3);
+}
+.lgroup-n {
+	margin-left: auto;
+	font-family: var(--font-mono);
+	color: var(--fg-4);
+}
+
 /* Item lines: a two-row block — identity/qty/uom/date on top, then
    specification + remark on their own full-width row underneath, so there's
    room to write. UOM column is widened. */

@@ -853,3 +853,114 @@ def payment_list(limit=100):
         order_by="payment_date desc, modified desc",
         limit_page_length=int(limit),
     )
+
+
+@frappe.whitelist()
+def payment_detail(name):
+    doc = frappe.get_doc("Procureflow Payment Entry", name)
+    doc.check_permission("read")
+    return {
+        "name": doc.name,
+        "supplier": doc.supplier,
+        "project": doc.get("project"),
+        "company": doc.get("company"),
+        "purchase_receipt": doc.purchase_receipt,
+        "previous_paid_amount": doc.get("previous_paid_amount"),
+        "outstanding_amount": doc.get("outstanding_amount"),
+        "amount": doc.amount,
+        "payment_date": doc.payment_date,
+        "remark": doc.get("remark"),
+        "docstatus": doc.docstatus,
+    }
+
+
+# ===========================================================================
+# Linked documents (the MR -> PO -> Receipt -> Payment chain) for detail pages
+# ===========================================================================
+
+# doctype -> (frontend kind, group label, SPA route segment)
+PROCURE_LINKS = {
+    "Material Request": ("material_request", "Material requests", "material-requests"),
+    "Purchase Order": ("purchase_order", "Purchase orders", "purchase-orders"),
+    "Purchase Receipt": ("purchase_receipt", "Receipts", "receipts"),
+    "Procureflow Payment Entry": ("payment", "Payments", "payments"),
+}
+
+
+@frappe.whitelist()
+def doc_links(doctype, name):
+    """Every document connected to `name` across the MR -> PO -> Purchase Receipt
+    -> Payment chain, grouped by type, for the detail-page "Linked documents"
+    panel. Links: PO Item.material_request, PR Item.purchase_order /
+    material_request, Procureflow Payment Entry.purchase_receipt."""
+    if doctype not in PROCURE_LINKS:
+        frappe.throw(_("Unsupported document type."))
+    frappe.get_doc(doctype, name).check_permission("read")
+
+    mrs, pos, prs, pays = set(), set(), set(), set()
+
+    def _collect(child_dt, filters, field, into):
+        for r in frappe.get_all(child_dt, filters=filters, fields=[field], limit_page_length=0):
+            if r.get(field):
+                into.add(r.get(field))
+
+    # Direct neighbours only (not a transitive cluster): each anchor shows the
+    # documents it is itself linked to, plus the payments on its receipt(s). You
+    # can still walk the whole chain by hopping between linked docs.
+    def _pays_for(pr_names):
+        if pr_names:
+            _collect("Procureflow Payment Entry", {"purchase_receipt": ["in", list(pr_names)]}, "name", pays)
+
+    if doctype == "Material Request":
+        _collect("Purchase Order Item", {"material_request": name}, "parent", pos)        # POs raised from this MR
+        _collect("Purchase Receipt Item", {"material_request": name}, "parent", prs)      # receipts of this MR's items
+        _pays_for(prs)
+    elif doctype == "Purchase Order":
+        _collect("Purchase Order Item", {"parent": name, "material_request": ["is", "set"]}, "material_request", mrs)
+        _collect("Purchase Receipt Item", {"purchase_order": name}, "parent", prs)
+        _pays_for(prs)
+    elif doctype == "Purchase Receipt":
+        _collect("Purchase Receipt Item", {"parent": name, "purchase_order": ["is", "set"]}, "purchase_order", pos)
+        _collect("Purchase Receipt Item", {"parent": name, "material_request": ["is", "set"]}, "material_request", mrs)
+        _collect("Procureflow Payment Entry", {"purchase_receipt": name}, "name", pays)
+    else:  # Procureflow Payment Entry
+        pr = frappe.db.get_value("Procureflow Payment Entry", name, "purchase_receipt")
+        if pr:
+            prs.add(pr)
+            _collect("Purchase Receipt Item", {"parent": pr, "purchase_order": ["is", "set"]}, "purchase_order", pos)
+            _collect("Purchase Receipt Item", {"parent": pr, "material_request": ["is", "set"]}, "material_request", mrs)
+            _collect("Procureflow Payment Entry", {"purchase_receipt": pr}, "name", pays)  # sibling payments
+
+    # Drop the anchor doc from its own group.
+    {"Material Request": mrs, "Purchase Order": pos, "Purchase Receipt": prs, "Procureflow Payment Entry": pays}[doctype].discard(name)
+
+    def mr_item(n):
+        d = frappe.db.get_value("Material Request", n, ["custom_select_project_", "workflow_state", "status", "docstatus"], as_dict=True) or {}
+        return {"name": n, "project": d.get("custom_select_project_"), "workflow_state": d.get("workflow_state"), "status": d.get("status"), "docstatus": d.get("docstatus")}
+
+    def po_item(n):
+        d = frappe.db.get_value("Purchase Order", n, ["supplier_name", "grand_total", "workflow_state", "status", "docstatus", "per_received"], as_dict=True) or {}
+        return {"name": n, "supplier_name": d.get("supplier_name"), "grand_total": d.get("grand_total"), "workflow_state": d.get("workflow_state"), "status": d.get("status"), "docstatus": d.get("docstatus"), "per_received": d.get("per_received")}
+
+    def pr_item(n):
+        d = frappe.db.get_value("Purchase Receipt", n, ["supplier_name", "posting_date", "custom_payment_status"], as_dict=True) or {}
+        return {"name": n, "supplier_name": d.get("supplier_name"), "posting_date": d.get("posting_date"), "payment_status": d.get("custom_payment_status")}
+
+    def pay_item(n):
+        d = frappe.db.get_value("Procureflow Payment Entry", n, ["amount", "payment_date", "supplier"], as_dict=True) or {}
+        return {"name": n, "amount": d.get("amount"), "payment_date": d.get("payment_date"), "supplier": d.get("supplier")}
+
+    plan = [
+        ("Material Request", sorted(mrs), mr_item),
+        ("Purchase Order", sorted(pos), po_item),
+        ("Purchase Receipt", sorted(prs), pr_item),
+        ("Procureflow Payment Entry", sorted(pays), pay_item),
+    ]
+    groups = []
+    for dt, names, build in plan:
+        if not names:
+            continue
+        kind, label, route = PROCURE_LINKS[dt]
+        groups.append({"kind": kind, "label": label, "route": route, "items": [build(n) for n in names]})
+
+    return {"groups": groups}

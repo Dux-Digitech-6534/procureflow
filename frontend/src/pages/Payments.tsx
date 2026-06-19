@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import { API, payTone, type PaymentListRow, type PrListRow } from '../lib/api';
 import { fmtDate, fmtMoney, parseServerError } from '../lib/format';
@@ -60,6 +61,7 @@ function RecordPaymentModal({ pr, onClose, onSaved }: { pr: PrListRow; onClose: 
 }
 
 export function Payments() {
+	const navigate = useNavigate();
 	const prRes = useFrappeGetCall<{ message: PrListRow[] }>(API.prList, {});
 	const payRes = useFrappeGetCall<{ message: PaymentListRow[] }>(API.paymentList, {});
 	const payable = (prRes.data?.message ?? []).filter((r) => r.outstanding > 0.001);
@@ -83,7 +85,14 @@ export function Payments() {
 			header: '',
 			align: 'right',
 			render: (r) => (
-				<button className="btn primary" style={{ padding: '5px 12px', fontSize: 12.5 }} onClick={() => setTarget(r)}>
+				<button
+					className="btn primary"
+					style={{ padding: '5px 12px', fontSize: 12.5 }}
+					onClick={(e) => {
+						e.stopPropagation();
+						setTarget(r);
+					}}
+				>
 					Record payment
 				</button>
 			),
@@ -124,6 +133,7 @@ export function Payments() {
 					rows={payable}
 					columns={payableCols}
 					rowKey={(r) => r.name}
+					onRowClick={(r) => navigate('/receipts/' + r.name)}
 					searchText={(r) => `${r.name} ${r.supplier_name ?? r.supplier ?? ''} ${r.custom_project_name ?? ''}`}
 					searchPlaceholder="Search receipt / supplier…"
 					filters={payableFilters}
@@ -139,6 +149,7 @@ export function Payments() {
 					rows={history}
 					columns={historyCols}
 					rowKey={(r) => r.name}
+					onRowClick={(r) => navigate('/payments/' + r.name)}
 					searchText={(r) => `${r.name} ${r.purchase_receipt} ${r.supplier} ${r.project ?? ''}`}
 					searchPlaceholder="Search payment / receipt / supplier…"
 					filters={historyFilters}

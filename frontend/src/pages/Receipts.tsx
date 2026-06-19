@@ -45,6 +45,7 @@ export function Receipts() {
 				rows={rows}
 				columns={columns}
 				rowKey={(r) => r.name}
+				onRowClick={(r) => navigate('/receipts/' + r.name)}
 				searchText={(r) => `${r.name} ${r.supplier_name ?? r.supplier ?? ''} ${r.custom_project_name ?? ''}`}
 				searchPlaceholder="Search id / supplier / project…"
 				filters={filters}

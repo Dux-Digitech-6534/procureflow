@@ -14,6 +14,7 @@ import {
 import { Field, SelectInput, SearchSelect, TextArea } from '../components/form';
 import { Icon } from '../components/Icon';
 import { DocLifecycleActions } from '../components/DocLifecycleActions';
+import { LinkedDocs } from '../components/LinkedDocs';
 import { fmtMoney, parseServerError } from '../lib/format';
 
 const AMOUNT_THRESHOLD = 50000;
@@ -544,11 +545,13 @@ export function NewPurchaseOrder() {
 					))}
 				</section>
 
-				<section className="card" style={{ maxWidth: 460, marginLeft: 'auto', width: '100%' }}>
-					<div className="chead">
-						<Icon name="rupee" size={16} />
-						<span className="ttl">Tax breakdown</span>
-					</div>
+					{isEdit && detail && <LinkedDocs doctype="Purchase Order" name={detail.name} />}
+
+					<section className="card" style={{ maxWidth: 460, marginLeft: 'auto', width: '100%' }}>
+						<div className="chead">
+							<Icon name="rupee" size={16} />
+							<span className="ttl">Tax breakdown</span>
+						</div>
 					<div className="taxsum">
 						<div className="taxrow">
 							<span className="k">Total (before tax)</span>

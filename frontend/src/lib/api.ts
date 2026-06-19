@@ -24,6 +24,8 @@ export const API = {
 	prDetail: 'procureflow.react_api.pr_detail',
 	savePayment: 'procureflow.react_api.save_payment',
 	paymentList: 'procureflow.react_api.payment_list',
+	paymentDetail: 'procureflow.react_api.payment_detail',
+	docLinks: 'procureflow.react_api.doc_links',
 } as const;
 
 export interface ProjectOption {
@@ -366,6 +368,87 @@ export interface PaymentListRow {
 	project: string | null;
 	amount: number;
 	payment_date: string | null;
+}
+
+export interface PrDetailItem {
+	item_code: string;
+	item_name: string;
+	qty: number;
+	uom: string;
+	rate: number;
+	amount: number;
+}
+
+export interface PrDetail {
+	name: string;
+	supplier: string;
+	supplier_name: string | null;
+	project: string | null;
+	posting_date: string | null;
+	grand_total: number | null;
+	payment_status: string | null;
+	total: number;
+	paid: number;
+	outstanding: number;
+	items: PrDetailItem[];
+}
+
+export interface PaymentDetail {
+	name: string;
+	supplier: string;
+	project: string | null;
+	company: string | null;
+	purchase_receipt: string;
+	previous_paid_amount: number | null;
+	outstanding_amount: number | null;
+	amount: number;
+	payment_date: string | null;
+	remark: string | null;
+	docstatus: number;
+}
+
+/* ----------------------------- Linked documents ---------------------------- */
+
+export interface LinkedMr {
+	name: string;
+	project: string | null;
+	workflow_state: string | null;
+	status: string | null;
+	docstatus: number;
+}
+export interface LinkedPo {
+	name: string;
+	supplier_name: string | null;
+	grand_total: number | null;
+	workflow_state: string | null;
+	status: string | null;
+	docstatus: number;
+	per_received: number | null;
+}
+export interface LinkedPr {
+	name: string;
+	supplier_name: string | null;
+	posting_date: string | null;
+	payment_status: string | null;
+}
+export interface LinkedPayment {
+	name: string;
+	amount: number | null;
+	payment_date: string | null;
+	supplier: string | null;
+}
+
+export type LinkKind = 'material_request' | 'purchase_order' | 'purchase_receipt' | 'payment';
+
+export interface DocLinkGroup {
+	kind: LinkKind;
+	label: string;
+	route: string;
+	items: (LinkedMr | LinkedPo | LinkedPr | LinkedPayment)[];
+}
+
+export interface DocLinks {
+	groups: DocLinkGroup[];
 }
 
 /** Tone for a payment status. */
