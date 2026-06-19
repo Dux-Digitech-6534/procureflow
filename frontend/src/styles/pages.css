@@ -135,3 +135,116 @@
 	padding: 12px 18px;
 	border-bottom: 1px solid var(--hairline);
 }
+
+/* ---- Purchase Order item grid (rate w/o tax · GST% · rate w/ tax · amount) ---- */
+.pohead,
+.potop {
+	display: grid;
+	grid-template-columns: 22px minmax(0, 1.5fr) 66px 76px 98px 54px 102px 100px 26px;
+	gap: 8px;
+	align-items: center;
+}
+.pohead {
+	padding: 11px 16px 8px;
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: var(--fg-3);
+	border-bottom: 1px solid var(--hairline);
+}
+.pohead .r,
+.potop .amt {
+	text-align: right;
+}
+.poline {
+	padding: 12px 16px;
+	border-bottom: 1px solid var(--hairline);
+}
+.poline:last-child {
+	border-bottom: 0;
+}
+.poline:hover {
+	background: var(--row-hover);
+}
+.poline .ix {
+	font-family: var(--font-mono);
+	color: var(--fg-3);
+	font-size: 12px;
+}
+.poline .inp {
+	height: 34px;
+	border-radius: 8px;
+	font-size: 12px;
+	padding: 0 8px;
+}
+.poline .amt {
+	font-family: var(--font-mono);
+	font-size: 12.5px;
+	color: var(--fg-1);
+}
+.pobot {
+	display: grid;
+	grid-template-columns: 1.3fr 1fr;
+	gap: 10px;
+	margin-top: 9px;
+	padding-left: 30px;
+}
+.pobot .ff {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.pobot .fl {
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: var(--fg-4);
+}
+.pobot .inp {
+	height: 32px;
+	border-radius: 8px;
+	font-size: 12px;
+	padding: 0 9px;
+}
+
+/* ---- Tax breakdown ---- */
+.taxsum {
+	padding: 4px 18px 14px;
+}
+.taxrow {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 8px 0;
+	border-bottom: 1px dashed var(--hairline);
+}
+.taxrow:last-child {
+	border-bottom: 0;
+}
+.taxrow .k {
+	font-size: 12.5px;
+	color: var(--fg-2);
+}
+.taxrow .v {
+	font-family: var(--font-mono);
+	font-size: 13px;
+	color: var(--fg-1);
+}
+.taxrow.grand {
+	margin-top: 4px;
+	padding-top: 12px;
+	border-top: 2px solid var(--hairline-2);
+	border-bottom: 0;
+}
+.taxrow.grand .k {
+	font-weight: 600;
+	color: var(--fg-1);
+	font-size: 13.5px;
+}
+.taxrow.grand .v {
+	font-weight: 700;
+	color: var(--iris);
+	font-size: 16px;
+}

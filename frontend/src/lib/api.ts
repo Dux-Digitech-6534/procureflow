@@ -5,6 +5,14 @@ export const API = {
 	saveMr: 'procureflow.react_api.save_material_request',
 	mrList: 'procureflow.react_api.mr_list',
 	mrDetail: 'procureflow.react_api.mr_detail',
+	poContext: 'procureflow.react_api.po_context',
+	partyTaxType: 'procureflow.react_api.party_tax_type',
+	approvedMrs: 'procureflow.react_api.approved_material_requests',
+	mrItemsForPo: 'procureflow.react_api.mr_items_for_po',
+	savePo: 'procureflow.react_api.save_purchase_order',
+	poList: 'procureflow.react_api.po_list',
+	poDetail: 'procureflow.react_api.po_detail',
+	itemGstRate: 'procureflow.purchase_tax.get_item_gst_rate',
 } as const;
 
 export interface ProjectOption {
@@ -79,4 +87,101 @@ export function stateTag(state: string | null | undefined): 'ok' | 'pend' | 'err
 	if (state === 'Approved') return 'ok';
 	if (state === 'Rejected') return 'err';
 	return 'pend';
+}
+
+/* ------------------------------- Purchase Order ----------------------------- */
+
+export interface SupplierOption {
+	name: string;
+	supplier_name: string;
+}
+
+export interface PoContext {
+	company: string;
+	suppliers: SupplierOption[];
+	categories: string[];
+	projects: ProjectOption[];
+	tax_types: string[];
+	today: string;
+}
+
+export interface ApprovedMr {
+	name: string;
+	custom_category: string | null;
+	custom_select_project_: string | null;
+	transaction_date: string | null;
+	schedule_date: string | null;
+}
+
+export interface PoSourceLine {
+	item_code: string;
+	item_name: string;
+	uom: string;
+	qty: number;
+	specification: string | null;
+	remark: string | null;
+	material_request: string | null;
+	material_request_item: string | null;
+	sub_category: string | null;
+}
+
+export interface PoListRow {
+	name: string;
+	supplier: string;
+	supplier_name: string | null;
+	custom_category: string | null;
+	custom_project_name: string | null;
+	workflow_state: string | null;
+	status: string | null;
+	grand_total: number | null;
+	transaction_date: string | null;
+	schedule_date: string | null;
+	items: number;
+}
+
+export interface PoLine {
+	item_code: string;
+	item_name: string;
+	qty: number;
+	uom: string;
+	rate: number;
+	gst_percent: number | null;
+	rate_with_tax: number | null;
+	amount: number;
+	specification: string | null;
+	remark: string | null;
+	schedule_date: string | null;
+	material_request: string | null;
+	sub_category: string | null;
+}
+
+export interface PoTaxRow {
+	description: string;
+	amount: number;
+}
+
+export interface PoDetail {
+	name: string;
+	supplier: string;
+	supplier_name: string | null;
+	category: string | null;
+	project: string | null;
+	company: string | null;
+	tax_type: string | null;
+	remark: string | null;
+	schedule_date: string | null;
+	workflow_state: string | null;
+	docstatus: number;
+	attachment: string | null;
+	net_total: number;
+	total_taxes: number;
+	grand_total: number;
+	taxes: PoTaxRow[];
+	items: PoLine[];
+}
+
+export interface SavePoResult {
+	name: string;
+	workflow_state: string;
+	docstatus: number;
 }
