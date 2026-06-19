@@ -13,7 +13,10 @@ import {
 } from '../lib/api';
 import { Field, SelectInput, SearchSelect, TextArea } from '../components/form';
 import { Icon } from '../components/Icon';
+import { DocLifecycleActions } from '../components/DocLifecycleActions';
 import { fmtMoney, parseServerError } from '../lib/format';
+
+const AMOUNT_THRESHOLD = 50000;
 
 const INTRA = 'Intra-State (CGST + SGST)';
 const INTER = 'Inter-State (IGST)';
@@ -55,7 +58,11 @@ export function NewPurchaseOrder() {
 		isEdit ? undefined : null,
 	);
 	const detail = detailRes.data?.message;
-	const readOnly = !!detail && detail.docstatus !== 0;
+	// A PO is editable only as a brand-new doc or while still in Draft. A Pending
+	// PO is docstatus 0 too, but it's out for approval — lock the form and surface
+	// the approver's workflow actions instead. Submitted/cancelled are read-only.
+	const editable = isEdit ? !!detail && detail.docstatus === 0 && detail.workflow_state === 'Draft' : true;
+	const readOnly = !editable;
 
 	const { call: savePo, loading: saving } = useFrappePostCall<{ message: SavePoResult }>(API.savePo);
 	const { call: fetchMrItems } = useFrappePostCall<{ message: { category: string; project: string; items: PoSourceLine[] } }>(API.mrItemsForPo);
@@ -216,6 +223,7 @@ export function NewPurchaseOrder() {
 	const net = lines.reduce((s, l) => s + num(l.qty) * num(l.rate), 0);
 	const gstTotal = lines.reduce((s, l) => s + (num(l.qty) * num(l.rate) * num(l.gst)) / 100, 0);
 	const grand = net + gstTotal;
+	const overThreshold = grand > AMOUNT_THRESHOLD;
 	const hasGst = gstTotal > 0;
 	const breakdown =
 		taxType === INTER
@@ -284,16 +292,32 @@ export function NewPurchaseOrder() {
 					)}
 				</div>
 				<div className="spacer" />
-				{!readOnly && (
+				{editable && (
 					<>
 						<button className="btn" disabled={saving} onClick={() => save(false)}>
 							Save draft
 						</button>
-						<button className="btn primary" disabled={saving} onClick={() => save(true)}>
-							<Icon name="send" size={15} />
-							{saving ? 'Saving…' : 'Send for approval'}
+						{/* Primary action follows the live grand total via the amount-gated
+						    workflow: <= ₹50k places the order directly (submitted), > ₹50k
+						    routes it for approval. The server re-resolves the real
+						    transition from get_transitions on save. */}
+						<button className="btn primary" disabled={saving} onClick={() => save(true)} title={`Grand total ${fmtMoney(grand, 'INR')}`}>
+							<Icon name={overThreshold ? 'send' : 'check'} size={15} />
+							{saving ? 'Saving…' : overThreshold ? 'Send for approval' : 'Place order'}
 						</button>
 					</>
+				)}
+				{isEdit && detail && !editable && (
+					<DocLifecycleActions
+						doctype="Purchase Order"
+						name={detail.name}
+						noun="order"
+						transitions={detail.transitions}
+						canCancel={detail.can_cancel}
+						canAmend={detail.can_amend}
+						onChanged={() => void detailRes.mutate()}
+						basePath="/purchase-orders"
+					/>
 				)}
 			</div>
 

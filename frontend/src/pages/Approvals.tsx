@@ -1,10 +1,12 @@
 import { useNavigate } from 'react-router-dom';
 import { useFrappeGetCall } from 'frappe-react-sdk';
-import { API, type PendingApprovals } from '../lib/api';
+import { API, type PendingApprovals, type PendingMr, type PendingPo } from '../lib/api';
 import { fmtDate, fmtMoney } from '../lib/format';
-import { Icon } from '../components/Icon';
 import { ActionButtons } from '../components/ActionButtons';
 import { EmptyMsg } from '../components/ui';
+import { DataTable, type Column, type Filter } from '../components/DataTable';
+
+const PRIORITY_RANK: Record<string, number> = { Low: 1, Medium: 2, High: 3 };
 
 export function Approvals() {
 	const navigate = useNavigate();
@@ -15,6 +17,36 @@ export function Approvals() {
 	const mrs = data?.message?.material_requests ?? [];
 	const pos = data?.message?.purchase_orders ?? [];
 	const total = mrs.length + pos.length;
+
+	const mrCols: Column<PendingMr>[] = [
+		{ key: 'name', header: 'Request', sortValue: (r) => r.name, render: (r) => <span className="id">{r.name}</span> },
+		{ key: 'category', header: 'Category', sortValue: (r) => r.custom_category, render: (r) => <span className="c1">{r.custom_category ?? '—'}</span> },
+		{ key: 'project', header: 'Project', sortValue: (r) => r.custom_select_project_, render: (r) => <span className="c2">{r.custom_select_project_ ?? '—'}</span> },
+		{ key: 'priority', header: 'Priority', sortValue: (r) => PRIORITY_RANK[r.custom_priority ?? ''] ?? 0, render: (r) => r.custom_priority ?? '—' },
+		{ key: 'owner', header: 'Raised by', sortValue: (r) => r.owner, render: (r) => <span className="dim">{r.owner}</span> },
+		{ key: 'date', header: 'Date', sortValue: (r) => r.transaction_date, render: (r) => <span className="dim">{fmtDate(r.transaction_date)}</span> },
+		{ key: 'actions', header: '', align: 'right', render: (r) => <ActionButtons doctype="Material Request" name={r.name} actions={r.actions} onDone={mutate} /> },
+	];
+
+	const mrFilters: Filter<PendingMr>[] = [
+		{ type: 'select', key: 'category', label: 'Category', value: (r) => r.custom_category },
+		{ type: 'select', key: 'project', label: 'Project', value: (r) => r.custom_select_project_ },
+		{ type: 'select', key: 'priority', label: 'Priority', value: (r) => r.custom_priority },
+	];
+
+	const poCols: Column<PendingPo>[] = [
+		{ key: 'name', header: 'Order', sortValue: (r) => r.name, render: (r) => <span className="id">{r.name}</span> },
+		{ key: 'supplier', header: 'Supplier', sortValue: (r) => r.supplier_name ?? r.supplier, render: (r) => <span className="c1">{r.supplier_name ?? r.supplier}</span> },
+		{ key: 'project', header: 'Project', sortValue: (r) => r.custom_project_name, render: (r) => <span className="c2">{r.custom_project_name ?? '—'}</span> },
+		{ key: 'total', header: 'Grand total', align: 'right', sortValue: (r) => r.grand_total ?? 0, render: (r) => <span className="num">{fmtMoney(r.grand_total, 'INR')}</span> },
+		{ key: 'date', header: 'Date', sortValue: (r) => r.transaction_date, render: (r) => <span className="dim">{fmtDate(r.transaction_date)}</span> },
+		{ key: 'actions', header: '', align: 'right', render: (r) => <ActionButtons doctype="Purchase Order" name={r.name} actions={r.actions} onDone={mutate} /> },
+	];
+
+	const poFilters: Filter<PendingPo>[] = [
+		{ type: 'select', key: 'supplier', label: 'Supplier', value: (r) => r.supplier_name ?? r.supplier },
+		{ type: 'select', key: 'project', label: 'Project', value: (r) => r.custom_project_name },
+	];
 
 	return (
 		<main>
@@ -38,81 +70,31 @@ export function Approvals() {
 
 			<div className="stack">
 				{mrs.length > 0 && (
-					<section className="card">
-						<div className="chead">
-							<Icon name="file-text" size={16} />
-							<span className="ttl">Material requests</span>
-							<span className="cnt">{mrs.length}</span>
-						</div>
-						<div className="tablescroll">
-							<table className="clickable">
-								<thead>
-									<tr>
-										<th>Request</th>
-										<th>Category</th>
-										<th>Project</th>
-										<th>Priority</th>
-										<th>Raised by</th>
-										<th>Date</th>
-										<th />
-									</tr>
-								</thead>
-								<tbody>
-									{mrs.map((r) => (
-										<tr key={r.name} onClick={() => navigate('/material-requests/' + r.name)}>
-											<td><span className="id">{r.name}</span></td>
-											<td className="c1">{r.custom_category ?? '—'}</td>
-											<td className="c2">{r.custom_select_project_ ?? '—'}</td>
-											<td>{r.custom_priority ?? '—'}</td>
-											<td className="dim">{r.owner}</td>
-											<td><span className="dim">{fmtDate(r.transaction_date)}</span></td>
-											<td style={{ textAlign: 'right' }}>
-												<ActionButtons doctype="Material Request" name={r.name} actions={r.actions} onDone={mutate} />
-											</td>
-										</tr>
-									))}
-								</tbody>
-							</table>
-						</div>
-					</section>
+					<DataTable
+						title="Material requests"
+						icon="file-text"
+						rows={mrs}
+						columns={mrCols}
+						rowKey={(r) => r.name}
+						onRowClick={(r) => navigate('/material-requests/' + r.name)}
+						searchText={(r) => `${r.name} ${r.custom_category ?? ''} ${r.custom_select_project_ ?? ''} ${r.owner}`}
+						searchPlaceholder="Search request…"
+						filters={mrFilters}
+					/>
 				)}
 
 				{pos.length > 0 && (
-					<section className="card">
-						<div className="chead">
-							<Icon name="cube" size={16} />
-							<span className="ttl">Purchase orders</span>
-							<span className="cnt">{pos.length}</span>
-						</div>
-						<div className="tablescroll">
-							<table className="clickable">
-								<thead>
-									<tr>
-										<th>Order</th>
-										<th>Supplier</th>
-										<th>Project</th>
-										<th style={{ textAlign: 'right' }}>Grand total</th>
-										<th>Date</th>
-										<th />
-									</tr>
-								</thead>
-								<tbody>
-									{pos.map((r) => (
-										<tr key={r.name} onClick={() => navigate('/purchase-orders/' + r.name)}>
-											<td><span className="id">{r.name}</span></td>
-											<td className="c1">{r.supplier_name ?? r.supplier}</td>
-											<td className="c2">{r.custom_project_name ?? '—'}</td>
-											<td style={{ textAlign: 'right' }}><span className="num">{fmtMoney(r.grand_total, 'INR')}</span></td>
-											<td><span className="dim">{fmtDate(r.transaction_date)}</span></td>
-											<td style={{ textAlign: 'right' }}>
-												<ActionButtons doctype="Purchase Order" name={r.name} actions={r.actions} onDone={mutate} />
-											</td>
-										</tr>
-									))}
-								</tbody>
-							</table>
-						</div>
-					</section>
+					<DataTable
+						title="Purchase orders"
+						icon="cube"
+						rows={pos}
+						columns={poCols}
+						rowKey={(r) => r.name}
+						onRowClick={(r) => navigate('/purchase-orders/' + r.name)}
+						searchText={(r) => `${r.name} ${r.supplier_name ?? r.supplier ?? ''} ${r.custom_project_name ?? ''}`}
+						searchPlaceholder="Search order…"
+						filters={poFilters}
+					/>
 				)}
 			</div>
 		</main>

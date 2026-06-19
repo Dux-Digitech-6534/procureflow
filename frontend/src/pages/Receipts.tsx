@@ -3,11 +3,30 @@ import { useFrappeGetCall } from 'frappe-react-sdk';
 import { API, payTone, type PrListRow } from '../lib/api';
 import { fmtDate, fmtMoney } from '../lib/format';
 import { Icon } from '../components/Icon';
+import { DataTable, type Column, type Filter } from '../components/DataTable';
 
 export function Receipts() {
 	const navigate = useNavigate();
 	const { data, isLoading, error } = useFrappeGetCall<{ message: PrListRow[] }>(API.prList, {});
 	const rows = data?.message ?? [];
+
+	const columns: Column<PrListRow>[] = [
+		{ key: 'name', header: 'Receipt', sortValue: (r) => r.name, render: (r) => <span className="id">{r.name}</span> },
+		{ key: 'supplier', header: 'Supplier', sortValue: (r) => r.supplier_name ?? r.supplier, render: (r) => <span className="c1">{r.supplier_name ?? r.supplier}</span> },
+		{ key: 'project', header: 'Project', sortValue: (r) => r.custom_project_name, render: (r) => <span className="c2">{r.custom_project_name ?? '—'}</span> },
+		{ key: 'total', header: 'Grand total', align: 'right', sortValue: (r) => r.grand_total ?? 0, render: (r) => <span className="num">{fmtMoney(r.grand_total, 'INR')}</span> },
+		{ key: 'paid', header: 'Paid', align: 'right', sortValue: (r) => r.paid, render: (r) => <span className="num">{fmtMoney(r.paid, 'INR')}</span> },
+		{ key: 'outstanding', header: 'Outstanding', align: 'right', sortValue: (r) => r.outstanding, render: (r) => <span className="num">{fmtMoney(r.outstanding, 'INR')}</span> },
+		{ key: 'payment', header: 'Payment', sortValue: (r) => r.custom_payment_status ?? 'Not Paid', render: (r) => <span className={'tag ' + payTone(r.custom_payment_status)}>{r.custom_payment_status ?? 'Not Paid'}</span> },
+		{ key: 'date', header: 'Date', sortValue: (r) => r.posting_date, render: (r) => <span className="dim">{fmtDate(r.posting_date)}</span> },
+	];
+
+	const filters: Filter<PrListRow>[] = [
+		{ type: 'select', key: 'payment', label: 'Payment', value: (r) => r.custom_payment_status ?? 'Not Paid' },
+		{ type: 'select', key: 'supplier', label: 'Supplier', value: (r) => r.supplier_name ?? r.supplier },
+		{ type: 'select', key: 'project', label: 'Project', value: (r) => r.custom_project_name },
+		{ type: 'dateRange', key: 'date', label: 'Posting date', value: (r) => r.posting_date },
+	];
 
 	return (
 		<main>
@@ -20,53 +39,20 @@ export function Receipts() {
 				</button>
 			</div>
 
-			<section className="card">
-				<div className="chead">
-					<Icon name="package" size={16} />
-					<span className="ttl">Purchase receipts</span>
-					<span className="cnt">{rows.length}</span>
-				</div>
-				{error && <div className="empty"><div className="t2" style={{ color: 'var(--err)' }}>Could not load receipts.</div></div>}
-				{isLoading && <div className="empty"><div className="t2">Loading…</div></div>}
-				{!isLoading && !error && rows.length === 0 && (
-					<div className="empty">
-						<div className="t1">No receipts yet</div>
-						<div className="t2">Record a receipt against an approved purchase order.</div>
-					</div>
-				)}
-				{rows.length > 0 && (
-					<div className="tablescroll">
-						<table>
-							<thead>
-								<tr>
-									<th>Receipt</th>
-									<th>Supplier</th>
-									<th>Project</th>
-									<th style={{ textAlign: 'right' }}>Grand total</th>
-									<th style={{ textAlign: 'right' }}>Paid</th>
-									<th style={{ textAlign: 'right' }}>Outstanding</th>
-									<th>Payment</th>
-									<th>Date</th>
-								</tr>
-							</thead>
-							<tbody>
-								{rows.map((r) => (
-									<tr key={r.name}>
-										<td><span className="id">{r.name}</span></td>
-										<td className="c1">{r.supplier_name ?? r.supplier}</td>
-										<td className="c2">{r.custom_project_name ?? '—'}</td>
-										<td style={{ textAlign: 'right' }}><span className="num">{fmtMoney(r.grand_total, 'INR')}</span></td>
-										<td style={{ textAlign: 'right' }}><span className="num">{fmtMoney(r.paid, 'INR')}</span></td>
-										<td style={{ textAlign: 'right' }}><span className="num">{fmtMoney(r.outstanding, 'INR')}</span></td>
-										<td><span className={'tag ' + payTone(r.custom_payment_status)}>{r.custom_payment_status ?? 'Not Paid'}</span></td>
-										<td><span className="dim">{fmtDate(r.posting_date)}</span></td>
-									</tr>
-								))}
-							</tbody>
-						</table>
-					</div>
-				)}
-			</section>
+			<DataTable
+				title="Purchase receipts"
+				icon="package"
+				rows={rows}
+				columns={columns}
+				rowKey={(r) => r.name}
+				searchText={(r) => `${r.name} ${r.supplier_name ?? r.supplier ?? ''} ${r.custom_project_name ?? ''}`}
+				searchPlaceholder="Search id / supplier / project…"
+				filters={filters}
+				loading={isLoading}
+				error={error ? 'Could not load receipts.' : undefined}
+				emptyTitle="No receipts yet"
+				emptyText="Record a receipt against an approved purchase order."
+			/>
 		</main>
 	);
 }

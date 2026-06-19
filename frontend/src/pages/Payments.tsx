@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import { API, payTone, type PaymentListRow, type PrListRow } from '../lib/api';
 import { fmtDate, fmtMoney, parseServerError } from '../lib/format';
-import { Icon } from '../components/Icon';
 import { Modal } from '../components/ui';
 import { Field } from '../components/form';
+import { DataTable, type Column, type Filter } from '../components/DataTable';
 
 function RecordPaymentModal({ pr, onClose, onSaved }: { pr: PrListRow; onClose: () => void; onSaved: () => void }) {
 	const { call: save, loading } = useFrappePostCall<{ message: { name: string } }>(API.savePayment);
@@ -71,6 +71,45 @@ export function Payments() {
 		payRes.mutate();
 	}
 
+	const payableCols: Column<PrListRow>[] = [
+		{ key: 'name', header: 'Receipt', sortValue: (r) => r.name, render: (r) => <span className="id">{r.name}</span> },
+		{ key: 'supplier', header: 'Supplier', sortValue: (r) => r.supplier_name ?? r.supplier, render: (r) => <span className="c1">{r.supplier_name ?? r.supplier}</span> },
+		{ key: 'project', header: 'Project', sortValue: (r) => r.custom_project_name, render: (r) => <span className="c2">{r.custom_project_name ?? '—'}</span> },
+		{ key: 'total', header: 'Grand total', align: 'right', sortValue: (r) => r.grand_total ?? 0, render: (r) => <span className="num">{fmtMoney(r.grand_total, 'INR')}</span> },
+		{ key: 'outstanding', header: 'Outstanding', align: 'right', sortValue: (r) => r.outstanding, render: (r) => <span className="num">{fmtMoney(r.outstanding, 'INR')}</span> },
+		{ key: 'status', header: 'Status', sortValue: (r) => r.custom_payment_status ?? 'Not Paid', render: (r) => <span className={'tag ' + payTone(r.custom_payment_status)}>{r.custom_payment_status ?? 'Not Paid'}</span> },
+		{
+			key: 'actions',
+			header: '',
+			align: 'right',
+			render: (r) => (
+				<button className="btn primary" style={{ padding: '5px 12px', fontSize: 12.5 }} onClick={() => setTarget(r)}>
+					Record payment
+				</button>
+			),
+		},
+	];
+
+	const payableFilters: Filter<PrListRow>[] = [
+		{ type: 'select', key: 'supplier', label: 'Supplier', value: (r) => r.supplier_name ?? r.supplier },
+		{ type: 'select', key: 'project', label: 'Project', value: (r) => r.custom_project_name },
+	];
+
+	const historyCols: Column<PaymentListRow>[] = [
+		{ key: 'name', header: 'Payment', sortValue: (r) => r.name, render: (r) => <span className="id">{r.name}</span> },
+		{ key: 'receipt', header: 'Receipt', sortValue: (r) => r.purchase_receipt, render: (r) => <span className="id">{r.purchase_receipt}</span> },
+		{ key: 'supplier', header: 'Supplier', sortValue: (r) => r.supplier, render: (r) => <span className="c1">{r.supplier}</span> },
+		{ key: 'project', header: 'Project', sortValue: (r) => r.project, render: (r) => <span className="c2">{r.project ?? '—'}</span> },
+		{ key: 'amount', header: 'Amount', align: 'right', sortValue: (r) => r.amount, render: (r) => <span className="num">{fmtMoney(r.amount, 'INR')}</span> },
+		{ key: 'date', header: 'Date', sortValue: (r) => r.payment_date, render: (r) => <span className="dim">{fmtDate(r.payment_date)}</span> },
+	];
+
+	const historyFilters: Filter<PaymentListRow>[] = [
+		{ type: 'select', key: 'supplier', label: 'Supplier', value: (r) => r.supplier },
+		{ type: 'select', key: 'project', label: 'Project', value: (r) => r.project },
+		{ type: 'dateRange', key: 'date', label: 'Payment date', value: (r) => r.payment_date },
+	];
+
 	return (
 		<main>
 			<div className="eyebrow">Procurement · finance</div>
@@ -79,85 +118,34 @@ export function Payments() {
 			</div>
 
 			<div className="stack">
-				<section className="card">
-					<div className="chead">
-						<Icon name="rupee" size={16} />
-						<span className="ttl">Outstanding receipts</span>
-						<span className="cnt">{payable.length}</span>
-					</div>
-					{payable.length === 0 ? (
-						<div className="empty"><div className="t2">Nothing outstanding — all receipts are fully paid.</div></div>
-					) : (
-						<div className="tablescroll">
-							<table>
-								<thead>
-									<tr>
-										<th>Receipt</th>
-										<th>Supplier</th>
-										<th>Project</th>
-										<th style={{ textAlign: 'right' }}>Grand total</th>
-										<th style={{ textAlign: 'right' }}>Outstanding</th>
-										<th>Status</th>
-										<th />
-									</tr>
-								</thead>
-								<tbody>
-									{payable.map((r) => (
-										<tr key={r.name}>
-											<td><span className="id">{r.name}</span></td>
-											<td className="c1">{r.supplier_name ?? r.supplier}</td>
-											<td className="c2">{r.custom_project_name ?? '—'}</td>
-											<td style={{ textAlign: 'right' }}><span className="num">{fmtMoney(r.grand_total, 'INR')}</span></td>
-											<td style={{ textAlign: 'right' }}><span className="num">{fmtMoney(r.outstanding, 'INR')}</span></td>
-											<td><span className={'tag ' + payTone(r.custom_payment_status)}>{r.custom_payment_status ?? 'Not Paid'}</span></td>
-											<td style={{ textAlign: 'right' }}>
-												<button className="btn primary" style={{ padding: '5px 12px', fontSize: 12.5 }} onClick={() => setTarget(r)}>
-													Record payment
-												</button>
-											</td>
-										</tr>
-									))}
-								</tbody>
-							</table>
-						</div>
-					)}
-				</section>
+				<DataTable
+					title="Outstanding receipts"
+					icon="rupee"
+					rows={payable}
+					columns={payableCols}
+					rowKey={(r) => r.name}
+					searchText={(r) => `${r.name} ${r.supplier_name ?? r.supplier ?? ''} ${r.custom_project_name ?? ''}`}
+					searchPlaceholder="Search receipt / supplier…"
+					filters={payableFilters}
+					loading={prRes.isLoading}
+					error={prRes.error ? 'Could not load receipts.' : undefined}
+					emptyTitle="Nothing outstanding"
+					emptyText="All receipts are fully paid."
+				/>
 
-				<section className="card">
-					<div className="chead">
-						<Icon name="banknote" size={16} />
-						<span className="ttl">Recent payments</span>
-						<span className="cnt">{history.length}</span>
-					</div>
-					{history.length === 0 ? (
-						<div className="empty"><div className="t2">No payments recorded yet.</div></div>
-					) : (
-						<div className="tablescroll">
-							<table>
-								<thead>
-									<tr>
-										<th>Payment</th>
-										<th>Receipt</th>
-										<th>Supplier</th>
-										<th style={{ textAlign: 'right' }}>Amount</th>
-										<th>Date</th>
-									</tr>
-								</thead>
-								<tbody>
-									{history.map((p) => (
-										<tr key={p.name}>
-											<td><span className="id">{p.name}</span></td>
-											<td><span className="id">{p.purchase_receipt}</span></td>
-											<td className="c1">{p.supplier}</td>
-											<td style={{ textAlign: 'right' }}><span className="num">{fmtMoney(p.amount, 'INR')}</span></td>
-											<td><span className="dim">{fmtDate(p.payment_date)}</span></td>
-										</tr>
-									))}
-								</tbody>
-							</table>
-						</div>
-					)}
-				</section>
+				<DataTable
+					title="Recent payments"
+					icon="banknote"
+					rows={history}
+					columns={historyCols}
+					rowKey={(r) => r.name}
+					searchText={(r) => `${r.name} ${r.purchase_receipt} ${r.supplier} ${r.project ?? ''}`}
+					searchPlaceholder="Search payment / receipt / supplier…"
+					filters={historyFilters}
+					loading={payRes.isLoading}
+					error={payRes.error ? 'Could not load payments.' : undefined}
+					emptyTitle="No payments recorded yet"
+				/>
 			</div>
 
 			{target && <RecordPaymentModal pr={target} onClose={() => setTarget(null)} onSaved={() => { setTarget(null); refetch(); }} />}

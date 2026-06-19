@@ -16,6 +16,7 @@ import {
 } from '../lib/api';
 import { Field, SelectInput, SearchSelect, TextArea } from '../components/form';
 import { Icon } from '../components/Icon';
+import { DocLifecycleActions } from '../components/DocLifecycleActions';
 import { parseServerError } from '../lib/format';
 
 interface LineRow {
@@ -236,6 +237,18 @@ export function NewMaterialRequest() {
 							{saving ? 'Saving…' : 'Submit for approval'}
 						</button>
 					</>
+				)}
+				{isEdit && detail && (
+					<DocLifecycleActions
+						doctype="Material Request"
+						name={detail.name}
+						noun="request"
+						transitions={detail.transitions}
+						canCancel={detail.can_cancel}
+						canAmend={detail.can_amend}
+						onChanged={() => void detailRes.mutate()}
+						basePath="/material-requests"
+					/>
 				)}
 			</div>
 

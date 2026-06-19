@@ -39,6 +39,40 @@ def _doc_actions(doctype, name, state):
         return []
 
 
+def _default_workflow_state(doctype):
+    """First state of the doctype's active workflow (the draft/initial state)."""
+    from frappe.model.workflow import get_workflow_name
+
+    wf_name = get_workflow_name(doctype)
+    if not wf_name:
+        return None
+    wf = frappe.get_doc("Workflow", wf_name)
+    return wf.states[0].state if wf.states else None
+
+
+def _doc_action_state(doc):
+    """Live, permission-checked actions for THIS user on a single doc:
+    the available workflow transitions (resolved via get_transitions, which
+    honours roles AND conditions) plus the cancel/amend lifecycle flags.
+
+    Frappe lifecycle (verified live): a submitted doc (docstatus 1) can be
+    Cancelled; only a Cancelled doc (docstatus 2) can be Amended — amend copies
+    it into a fresh draft via amended_from. So Cancel surfaces on docstatus 1 and
+    Amend on docstatus 2 (not yet amended). Everything is permission-gated.
+    """
+    transitions = []
+    try:
+        transitions = [t.action for t in get_transitions(doc)]
+    except Exception:
+        transitions = []
+    can_cancel = bool(doc.docstatus == 1 and frappe.has_permission(doc.doctype, "cancel", doc))
+    already_amended = bool(frappe.db.exists(doc.doctype, {"amended_from": doc.name}))
+    can_amend = bool(
+        doc.docstatus == 2 and not already_amended and frappe.has_permission(doc.doctype, "amend", doc)
+    )
+    return {"transitions": transitions, "can_cancel": can_cancel, "can_amend": can_amend}
+
+
 def _company():
     return (
         frappe.defaults.get_user_default("company")
@@ -252,6 +286,7 @@ def mr_detail(name):
         "owner": doc.owner,
         "attachment": doc.get("custom_add_receipt"),
         "items": items,
+        **_doc_action_state(doc),
     }
 
 
@@ -403,12 +438,15 @@ def save_purchase_order(data):
     doc.save()
 
     if data.get("submit_for_approval"):
-        try:
-            from frappe.model.workflow import apply_workflow
-
-            apply_workflow(doc, "Send for Approval")
-        except Exception:
-            frappe.log_error(frappe.get_traceback(), "procureflow: PO send-for-approval")
+        # Resolve the real forward transition from the LIVE workflow rather than
+        # hardcoding: the PO workflow is amount-gated, so from Draft a Purchase
+        # Officer sees "Place Order" (grand_total <= 50000 -> submitted/Approved
+        # directly) OR "Send for Approval" (> 50000 -> Pending). get_transitions
+        # honours both the amount condition and the user's roles.
+        forward = [t.action for t in get_transitions(doc) if "reject" not in (t.action or "").lower()]
+        if not forward:
+            frappe.throw(_("You do not have permission to place or submit this order."))
+        apply_workflow(doc, forward[0])
 
     doc.reload()
     return {"name": doc.name, "workflow_state": doc.workflow_state, "docstatus": doc.docstatus}
@@ -492,6 +530,7 @@ def po_detail(name):
         "grand_total": doc.grand_total,
         "taxes": taxes,
         "items": items,
+        **_doc_action_state(doc),
     }
 
 
@@ -515,6 +554,43 @@ def apply_action(doctype, name, action, remark=""):
         "workflow_state": doc.get("workflow_state"),
         "docstatus": doc.docstatus,
     }
+
+
+@frappe.whitelist()
+def cancel_doc(doctype, name):
+    """Cancel a submitted MR/PO (docstatus 1 -> 2). Respects frappe cancel perms."""
+    if doctype not in ("Material Request", "Purchase Order"):
+        frappe.throw(_("Unsupported document type."))
+    doc = frappe.get_doc(doctype, name)
+    if not frappe.has_permission(doctype, "cancel", doc):
+        raise frappe.PermissionError(_("You are not permitted to cancel this document."))
+    doc.cancel()
+    return {"name": doc.name, "workflow_state": doc.get("workflow_state"), "docstatus": doc.docstatus}
+
+
+@frappe.whitelist()
+def amend_doc(doctype, name):
+    """Amend a cancelled MR/PO: copy it into a fresh editable draft (amended_from),
+    reset to the workflow's initial state. Respects frappe amend perms. Returns the
+    new draft's name so the SPA can navigate to it."""
+    if doctype not in ("Material Request", "Purchase Order"):
+        frappe.throw(_("Unsupported document type."))
+    src = frappe.get_doc(doctype, name)
+    if src.docstatus != 2:
+        frappe.throw(_("Only a cancelled document can be amended. Cancel it first."))
+    if frappe.db.exists(doctype, {"amended_from": name}):
+        frappe.throw(_("This document has already been amended."))
+    if not frappe.has_permission(doctype, "amend", src):
+        raise frappe.PermissionError(_("You are not permitted to amend this document."))
+
+    amended = frappe.copy_doc(src)
+    amended.docstatus = 0
+    amended.amended_from = name
+    init = _default_workflow_state(doctype)
+    if init and amended.meta.has_field("workflow_state"):
+        amended.workflow_state = init
+    amended.insert()
+    return {"name": amended.name, "workflow_state": amended.get("workflow_state"), "docstatus": amended.docstatus}
 
 
 @frappe.whitelist()

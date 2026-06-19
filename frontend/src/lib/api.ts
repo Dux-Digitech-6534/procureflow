@@ -14,6 +14,8 @@ export const API = {
 	poDetail: 'procureflow.react_api.po_detail',
 	itemGstRate: 'procureflow.purchase_tax.get_item_gst_rate',
 	applyAction: 'procureflow.react_api.apply_action',
+	cancelDoc: 'procureflow.react_api.cancel_doc',
+	amendDoc: 'procureflow.react_api.amend_doc',
 	pendingApprovals: 'procureflow.react_api.pending_approvals',
 	receivablePos: 'procureflow.react_api.receivable_pos',
 	poReceiptItems: 'procureflow.react_api.po_receipt_items',
@@ -71,7 +73,14 @@ export interface MrLine {
 	sub_category: string | null;
 }
 
-export interface MrDetail {
+/** Live, permission-checked lifecycle actions returned by mr_detail / po_detail. */
+export interface DocActionState {
+	transitions: string[];
+	can_cancel: boolean;
+	can_amend: boolean;
+}
+
+export interface MrDetail extends DocActionState {
 	name: string;
 	category: string | null;
 	project: string | null;
@@ -171,7 +180,7 @@ export interface PoTaxRow {
 	amount: number;
 }
 
-export interface PoDetail {
+export interface PoDetail extends DocActionState {
 	name: string;
 	supplier: string;
 	supplier_name: string | null;

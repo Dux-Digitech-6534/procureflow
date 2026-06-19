@@ -1,26 +1,41 @@
-import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFrappeGetCall } from 'frappe-react-sdk';
 import { API, stateTag, type MrListRow } from '../lib/api';
 import { fmtDate } from '../lib/format';
+import { Icon } from '../components/Icon';
 import { ActionButtons } from '../components/ActionButtons';
+import { DataTable, type Column, type Filter } from '../components/DataTable';
+
+const PRIORITY_RANK: Record<string, number> = { Low: 1, Medium: 2, High: 3 };
 
 export function MaterialRequests() {
 	const navigate = useNavigate();
-	const [search, setSearch] = useState('');
 	const { data, isLoading, error, mutate } = useFrappeGetCall<{ message: MrListRow[] }>(API.mrList, {});
 	const rows = data?.message ?? [];
 
-	const filtered = useMemo(() => {
-		const q = search.trim().toLowerCase();
-		if (!q) return rows;
-		return rows.filter(
-			(r) =>
-				r.name.toLowerCase().includes(q) ||
-				(r.custom_select_project_ ?? '').toLowerCase().includes(q) ||
-				(r.custom_category ?? '').toLowerCase().includes(q),
-		);
-	}, [rows, search]);
+	const columns: Column<MrListRow>[] = [
+		{ key: 'name', header: 'Request', sortValue: (r) => r.name, render: (r) => <span className="id">{r.name}</span> },
+		{ key: 'category', header: 'Category', sortValue: (r) => r.custom_category, render: (r) => <span className="c1">{r.custom_category ?? '—'}</span> },
+		{ key: 'project', header: 'Project', sortValue: (r) => r.custom_select_project_, render: (r) => <span className="c2">{r.custom_select_project_ ?? '—'}</span> },
+		{ key: 'items', header: 'Items', sortValue: (r) => r.items, render: (r) => <span className="num">{r.items}</span> },
+		{ key: 'priority', header: 'Priority', sortValue: (r) => PRIORITY_RANK[r.custom_priority ?? ''] ?? 0, render: (r) => r.custom_priority ?? '—' },
+		{ key: 'date', header: 'Required by', sortValue: (r) => r.schedule_date, render: (r) => <span className="dim">{fmtDate(r.schedule_date)}</span> },
+		{ key: 'status', header: 'Status', sortValue: (r) => r.workflow_state, render: (r) => <span className={'tag ' + stateTag(r.workflow_state)}>{r.workflow_state ?? '—'}</span> },
+		{
+			key: 'actions',
+			header: '',
+			align: 'right',
+			render: (r) => (r.actions?.length ? <ActionButtons doctype="Material Request" name={r.name} actions={r.actions} onDone={mutate} /> : null),
+		},
+	];
+
+	const filters: Filter<MrListRow>[] = [
+		{ type: 'select', key: 'status', label: 'Status', value: (r) => r.workflow_state },
+		{ type: 'select', key: 'category', label: 'Category', value: (r) => r.custom_category },
+		{ type: 'select', key: 'project', label: 'Project', value: (r) => r.custom_select_project_ },
+		{ type: 'select', key: 'priority', label: 'Priority', value: (r) => r.custom_priority },
+		{ type: 'dateRange', key: 'date', label: 'Required by', value: (r) => r.schedule_date },
+	];
 
 	return (
 		<main>
@@ -29,73 +44,25 @@ export function MaterialRequests() {
 				<h1 style={{ fontFamily: 'var(--font-ui)', color: 'var(--fg-1)' }}>Material requests</h1>
 				<div className="spacer" />
 				<button className="btn primary" onClick={() => navigate('/material-requests/new')}>
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-						<path d="M12 5v14M5 12h14" />
-					</svg>
-					New request
+					<Icon name="plus" size={14} /> New request
 				</button>
 			</div>
 
-			<section className="card">
-				<div className="chead">
-					<div className="ttl">All requests</div>
-					<div className="cnt">{rows.length}</div>
-					<div className="spacer" />
-					<input
-						className="inp"
-						style={{ height: 34, width: 240 }}
-						placeholder="Search id / project / category…"
-						value={search}
-						onChange={(e) => setSearch(e.target.value)}
-					/>
-				</div>
-
-				{error && <div className="empty"><div className="t2" style={{ color: 'var(--err)' }}>Could not load requests.</div></div>}
-				{isLoading && <div className="empty"><div className="t2">Loading…</div></div>}
-				{!isLoading && !error && filtered.length === 0 && (
-					<div className="empty">
-						<div className="t1">No material requests yet</div>
-						<div className="t2">Create your first request to get started.</div>
-					</div>
-				)}
-
-				{filtered.length > 0 && (
-					<div className="tablescroll">
-						<table className="clickable">
-							<thead>
-								<tr>
-									<th>Request</th>
-									<th>Category</th>
-									<th>Project</th>
-									<th>Items</th>
-									<th>Priority</th>
-									<th>Required by</th>
-									<th>Status</th>
-									<th />
-								</tr>
-							</thead>
-							<tbody>
-								{filtered.map((r) => (
-									<tr key={r.name} onClick={() => navigate('/material-requests/' + r.name)}>
-										<td><span className="id">{r.name}</span></td>
-										<td className="c1">{r.custom_category ?? '—'}</td>
-										<td className="c2">{r.custom_select_project_ ?? '—'}</td>
-										<td><span className="num">{r.items}</span></td>
-										<td>{r.custom_priority ?? '—'}</td>
-										<td><span className="dim">{fmtDate(r.schedule_date)}</span></td>
-										<td><span className={'tag ' + stateTag(r.workflow_state)}>{r.workflow_state ?? '—'}</span></td>
-										<td style={{ textAlign: 'right' }}>
-											{r.actions?.length ? (
-												<ActionButtons doctype="Material Request" name={r.name} actions={r.actions} onDone={mutate} />
-											) : null}
-										</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
-					</div>
-				)}
-			</section>
+			<DataTable
+				title="All requests"
+				icon="file-text"
+				rows={rows}
+				columns={columns}
+				rowKey={(r) => r.name}
+				onRowClick={(r) => navigate('/material-requests/' + r.name)}
+				searchText={(r) => `${r.name} ${r.custom_select_project_ ?? ''} ${r.custom_category ?? ''}`}
+				searchPlaceholder="Search id / project / category…"
+				filters={filters}
+				loading={isLoading}
+				error={error ? 'Could not load requests.' : undefined}
+				emptyTitle="No material requests yet"
+				emptyText="Create your first request to get started."
+			/>
 		</main>
 	);
 }
