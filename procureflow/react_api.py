@@ -183,13 +183,13 @@ def mr_list(search="", limit=100):
     names = [r.name for r in rows]
     counts = {}
     if names:
-        for c in frappe.get_all(
+        for r in frappe.get_all(
             "Material Request Item",
             filters={"parent": ["in", names]},
-            fields=["parent", "count(name) as n"],
-            group_by="parent",
+            fields=["parent"],
+            limit_page_length=0,
         ):
-            counts[c.parent] = c.n
+            counts[r.parent] = counts.get(r.parent, 0) + 1
     search = (search or "").strip().lower()
     out = []
     for r in rows:
