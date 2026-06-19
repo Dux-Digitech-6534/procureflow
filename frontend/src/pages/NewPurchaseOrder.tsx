@@ -264,7 +264,16 @@ export function NewPurchaseOrder() {
 				})),
 			};
 			const res = await savePo({ data: payload });
-			navigate('/purchase-orders/' + res.message.name);
+			// When editing an existing PO we stay on the same URL, so React Router
+			// won't refetch — revalidate the detail so the new workflow state (e.g.
+			// Draft -> Approved after "Place order") and its buttons update without a
+			// manual refresh. A brand-new PO changes the route, which refetches.
+			if (isEdit && res.message.name === id) {
+				setSeeded(false);
+				await detailRes.mutate();
+			} else {
+				navigate('/purchase-orders/' + res.message.name);
+			}
 		} catch (e) {
 			setErr(parseServerError(e));
 		}

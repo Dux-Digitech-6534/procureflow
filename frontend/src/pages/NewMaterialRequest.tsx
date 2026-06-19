@@ -197,7 +197,15 @@ export function NewMaterialRequest() {
 				}
 				setPendingFile(null);
 			}
-			navigate('/material-requests/' + newName);
+			// Editing an existing request stays on the same URL — revalidate in place
+			// so the state/buttons update without a manual refresh; a new request
+			// changes the route, which refetches.
+			if (isEdit && newName === id) {
+				setSeeded(false);
+				await detailRes.mutate();
+			} else {
+				navigate('/material-requests/' + newName);
+			}
 		} catch (e) {
 			setErr(parseServerError(e));
 		}
