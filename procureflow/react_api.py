@@ -40,20 +40,17 @@ def _loads(payload):
 @frappe.whitelist()
 def mr_context():
     categories = [c.name for c in frappe.get_all("Material Category", fields=["name"], order_by="name")]
+    # company_name is the Project's company (a Company Master) — shown read-only,
+    # auto-filled from the picked project, like the desk does.
     projects = frappe.get_all(
-        "Project Master", fields=["name", "project_name", "store_name"], order_by="name"
+        "Project Master",
+        fields=["name", "project_name", "store_name", "company_name"],
+        order_by="name",
     )
-    departments = [
-        d.name
-        for d in frappe.get_all(
-            "Department", filters={"is_group": 0}, fields=["name"], order_by="name"
-        )
-    ]
     return {
         "company": _company(),
         "categories": categories,
         "projects": projects,
-        "departments": departments,
         "priorities": PRIORITIES,
         "today": nowdate(),
     }
@@ -121,7 +118,6 @@ def save_material_request(data):
     doc.custom_select_project_ = project
     if set_warehouse:
         doc.set_warehouse = set_warehouse
-    doc.custom_department = data.get("department")
     doc.custom_priority = data.get("priority") or "Medium"
     doc.custom_remark = data.get("remark")
     if not doc.get("custom_username"):
@@ -147,6 +143,7 @@ def save_material_request(data):
                 "schedule_date": row.get("schedule_date") or doc.schedule_date,
                 "warehouse": set_warehouse,
                 "custom_specification": row.get("specification"),
+                "custom_remark": row.get("remark"),
             },
         )
 
@@ -217,6 +214,7 @@ def mr_detail(name):
                 "uom": it.uom,
                 "schedule_date": it.schedule_date,
                 "specification": it.get("custom_specification"),
+                "remark": it.get("custom_remark"),
                 "sub_category": sub,
             }
         )

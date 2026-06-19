@@ -5,6 +5,7 @@ import { ThemeProvider } from './lib/theme';
 import { AppShell } from './components/AppShell';
 import { MaterialRequests } from './pages/MaterialRequests';
 import { NewMaterialRequest } from './pages/NewMaterialRequest';
+import { Settings } from './pages/Settings';
 import { Placeholder } from './pages/Placeholder';
 
 function AuthGate({ children }: { children: ReactNode }) {
@@ -38,6 +39,7 @@ export default function App() {
 									path="payments"
 									element={<Placeholder title="Payments" eyebrow="Procurement · finance" />}
 								/>
+								<Route path="settings" element={<Settings />} />
 								<Route path="*" element={<Placeholder title="Not found" eyebrow="404" />} />
 							</Route>
 						</Routes>

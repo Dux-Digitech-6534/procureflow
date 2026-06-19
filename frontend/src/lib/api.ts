@@ -11,13 +11,13 @@ export interface ProjectOption {
 	name: string;
 	project_name: string;
 	store_name: string | null;
+	company_name: string | null;
 }
 
 export interface MrContext {
 	company: string;
 	categories: string[];
 	projects: ProjectOption[];
-	departments: string[];
 	priorities: string[];
 	today: string;
 }
@@ -49,6 +49,7 @@ export interface MrLine {
 	uom: string;
 	schedule_date: string | null;
 	specification: string | null;
+	remark: string | null;
 	sub_category: string | null;
 }
 

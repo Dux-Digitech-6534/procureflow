@@ -14,7 +14,8 @@ import {
 	type MrDetail,
 	type SaveMrResult,
 } from '../lib/api';
-import { SearchSelect } from '../components/SearchSelect';
+import { Field, SelectInput, SearchSelect, TextArea } from '../components/form';
+import { Icon } from '../components/Icon';
 import { parseServerError } from '../lib/format';
 
 interface LineRow {
@@ -24,6 +25,7 @@ interface LineRow {
 	sub_category: string | null;
 	qty: string;
 	specification: string;
+	remark: string;
 	schedule_date: string;
 }
 
@@ -45,7 +47,6 @@ export function NewMaterialRequest() {
 
 	const [category, setCategory] = useState('');
 	const [project, setProject] = useState('');
-	const [department, setDepartment] = useState('');
 	const [priority, setPriority] = useState('Medium');
 	const [requiredBy, setRequiredBy] = useState('');
 	const [remark, setRemark] = useState('');
@@ -58,6 +59,7 @@ export function NewMaterialRequest() {
 	const { updateDoc } = useFrappeUpdateDoc();
 	const fileRef = useRef<HTMLInputElement>(null);
 	const [attachment, setAttachment] = useState<string | null>(null);
+	const [pendingFile, setPendingFile] = useState<File | null>(null);
 
 	useEffect(() => {
 		if (!isEdit && ctx && !requiredBy) setRequiredBy(ctx.today);
@@ -67,7 +69,6 @@ export function NewMaterialRequest() {
 		if (isEdit && detail && !seeded) {
 			setCategory(detail.category ?? '');
 			setProject(detail.project ?? '');
-			setDepartment(detail.department ?? '');
 			setPriority(detail.priority ?? 'Medium');
 			setRequiredBy(detail.schedule_date ?? '');
 			setRemark(detail.remark ?? '');
@@ -80,6 +81,7 @@ export function NewMaterialRequest() {
 					sub_category: it.sub_category,
 					qty: String(it.qty ?? ''),
 					specification: it.specification ?? '',
+					remark: it.remark ?? '',
 					schedule_date: it.schedule_date ?? '',
 				})),
 			);
@@ -103,10 +105,9 @@ export function NewMaterialRequest() {
 		[itemOptions],
 	);
 
-	const storeName = useMemo(
-		() => ctx?.projects.find((p) => p.name === project)?.store_name ?? '',
-		[ctx, project],
-	);
+	const proj = useMemo(() => ctx?.projects.find((p) => p.name === project), [ctx, project]);
+	const storeName = proj?.store_name ?? '';
+	const companyName = proj?.company_name ?? '';
 
 	function onCategoryChange(v: string) {
 		setCategory(v);
@@ -125,6 +126,7 @@ export function NewMaterialRequest() {
 				sub_category: opt.sub_category,
 				qty: '',
 				specification: '',
+				remark: '',
 				schedule_date: requiredBy,
 			},
 		]);
@@ -134,6 +136,28 @@ export function NewMaterialRequest() {
 	}
 	function removeLine(i: number) {
 		setLines((ls) => ls.filter((_, idx) => idx !== i));
+	}
+
+	async function uploadTo(name: string, file: File) {
+		const res = await upload(file, {
+			doctype: 'Material Request',
+			docname: name,
+			fieldname: 'custom_add_receipt',
+			isPrivate: true,
+		});
+		await updateDoc('Material Request', name, { custom_add_receipt: res.file_url });
+		return res.file_url;
+	}
+
+	function onPickFile(file: File) {
+		setErr('');
+		if (id) {
+			uploadTo(id, file)
+				.then((url) => setAttachment(url))
+				.catch((e) => setErr(parseServerError(e)));
+		} else {
+			setPendingFile(file); // staged — uploaded right after the first save
+		}
 	}
 
 	async function save(strict: boolean) {
@@ -149,7 +173,6 @@ export function NewMaterialRequest() {
 				name: id ?? null,
 				category,
 				project: project || null,
-				department: department || null,
 				priority,
 				schedule_date: requiredBy || null,
 				remark,
@@ -159,27 +182,21 @@ export function NewMaterialRequest() {
 					uom: l.uom,
 					schedule_date: l.schedule_date || null,
 					specification: l.specification,
+					remark: l.remark,
 				})),
 			};
 			const res = await saveMr({ data: payload });
-			navigate('/material-requests/' + res.message.name);
-		} catch (e) {
-			setErr(parseServerError(e));
-		}
-	}
-
-	async function onFile(file: File) {
-		if (!id) return;
-		setErr('');
-		try {
-			const res = await upload(file, {
-				doctype: 'Material Request',
-				docname: id,
-				fieldname: 'custom_add_receipt',
-				isPrivate: true,
-			});
-			await updateDoc('Material Request', id, { custom_add_receipt: res.file_url });
-			setAttachment(res.file_url);
+			const newName = res.message.name;
+			if (pendingFile && !id) {
+				try {
+					await uploadTo(newName, pendingFile);
+				} catch (e) {
+					/* non-fatal — the MR is saved; surface but still navigate */
+					console.error(e);
+				}
+				setPendingFile(null);
+			}
+			navigate('/material-requests/' + newName);
 		} catch (e) {
 			setErr(parseServerError(e));
 		}
@@ -215,9 +232,7 @@ export function NewMaterialRequest() {
 							Save draft
 						</button>
 						<button className="btn primary" disabled={busy} onClick={() => save(true)}>
-							<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-								<path d="M4 12l5 5L20 6" />
-							</svg>
+							<Icon name="check" size={15} />
 							{saving ? 'Saving…' : 'Submit for approval'}
 						</button>
 					</>
@@ -226,11 +241,10 @@ export function NewMaterialRequest() {
 
 			{err && (
 				<div className="alert">
-					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-						<circle cx="12" cy="12" r="9" />
-						<path d="M12 8v5M12 16h.01" />
-					</svg>
-					<b>Couldn’t save.</b> {err}
+					<Icon name="warning" size={16} />
+					<span>
+						<b>Couldn’t save.</b> {err}
+					</span>
 				</div>
 			)}
 
@@ -238,30 +252,21 @@ export function NewMaterialRequest() {
 				<div className="stack">
 					<section className="card accent">
 						<div className="chead">
-							<div className="ttl">Request details</div>
+							<Icon name="file-text" size={16} />
+							<span className="ttl">Request details</span>
 						</div>
 						<div className="formgrid">
-							<div className="field">
-								<label className="flabel">
-									Category <em>*</em>
-								</label>
-								<select
-									className="inp"
+							<Field label="Category" required hint="Pick the category first — items are filtered to this category.">
+								<SelectInput
 									value={category}
+									onChange={onCategoryChange}
 									disabled={readOnly}
-									onChange={(e) => onCategoryChange(e.target.value)}
-								>
-									<option value="">Select category…</option>
-									{ctx?.categories.map((c) => (
-										<option key={c} value={c}>
-											{c}
-										</option>
-									))}
-								</select>
-								<span className="fhint">Pick the category first — items are filtered to this category.</span>
-							</div>
-							<div className="field">
-								<label className="flabel">Project</label>
+									allowEmpty
+									placeholder="Select category…"
+									options={(ctx?.categories ?? []).map((c) => ({ value: c }))}
+								/>
+							</Field>
+							<Field label="Project" hint="Store / warehouse and company auto-fill from the project.">
 								<SearchSelect
 									value={project}
 									onChange={setProject}
@@ -270,44 +275,22 @@ export function NewMaterialRequest() {
 									options={(ctx?.projects ?? []).map((p) => ({
 										value: p.name,
 										label: p.project_name || p.name,
-										sub: p.store_name ? `Store: ${p.store_name}` : undefined,
+										sub: [p.company_name, p.store_name].filter(Boolean).join(' · '),
 									}))}
 								/>
-								<span className="fhint">Store / warehouse auto-fills from the project.</span>
-							</div>
-							<div className="field">
-								<label className="flabel">Department</label>
-								<select
-									className="inp"
-									value={department}
-									disabled={readOnly}
-									onChange={(e) => setDepartment(e.target.value)}
-								>
-									<option value="">—</option>
-									{ctx?.departments.map((d) => (
-										<option key={d} value={d}>
-											{d}
-										</option>
-									))}
-								</select>
-							</div>
-							<div className="field">
-								<label className="flabel">Priority</label>
-								<select
-									className="inp"
+							</Field>
+							<Field label="Company">
+								<input className="inp" disabled value={companyName || '—'} />
+							</Field>
+							<Field label="Priority">
+								<SelectInput
 									value={priority}
+									onChange={setPriority}
 									disabled={readOnly}
-									onChange={(e) => setPriority(e.target.value)}
-								>
-									{(ctx?.priorities ?? ['Low', 'Medium', 'High']).map((p) => (
-										<option key={p} value={p}>
-											{p}
-										</option>
-									))}
-								</select>
-							</div>
-							<div className="field">
-								<label className="flabel">Required by</label>
+									options={(ctx?.priorities ?? ['Low', 'Medium', 'High']).map((p) => ({ value: p }))}
+								/>
+							</Field>
+							<Field label="Required by">
 								<input
 									className="inp mono"
 									type="date"
@@ -315,62 +298,68 @@ export function NewMaterialRequest() {
 									disabled={readOnly}
 									onChange={(e) => setRequiredBy(e.target.value)}
 								/>
-							</div>
-							<div className="field">
-								<label className="flabel">Store / warehouse</label>
+							</Field>
+							<Field label="Store / warehouse">
 								<input className="inp" disabled value={storeName || '—'} />
+							</Field>
+							<div className="span2">
+								<Field label="Remark">
+									<TextArea
+										value={remark}
+										onChange={setRemark}
+										rows={2}
+										disabled={readOnly}
+										placeholder="Header note for the whole request…"
+									/>
+								</Field>
 							</div>
-							<div className="field span2">
-								<label className="flabel">Remark</label>
-								<textarea
-									className="inp area"
-									rows={2}
-									value={remark}
-									disabled={readOnly}
-									placeholder="Header note for the whole request…"
-									onChange={(e) => setRemark(e.target.value)}
-								/>
-							</div>
-							<div className="field span2">
-								<label className="flabel">Attachment</label>
-								<input
-									ref={fileRef}
-									type="file"
-									style={{ display: 'none' }}
-									onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
-								/>
-								<div
-									className={'upload' + (isEdit && !readOnly ? '' : ' disabled')}
-									onClick={() => isEdit && !readOnly && fileRef.current?.click()}
-								>
-									<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-										<path d="M12 16V4m0 0l-4 4m4-4l4 4" />
-										<path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
-									</svg>
-									<div>
-										{attachment ? (
-											<a href={attachment} target="_blank" rel="noreferrer" style={{ color: 'var(--iris)' }}>
-												View attached file
-											</a>
-										) : isEdit && !readOnly ? (
-											<>
-												{uploading ? 'Uploading…' : 'Drop a file or '}
-												{!uploading && <span style={{ color: 'var(--iris)', fontWeight: 500 }}>browse</span>}
-												&nbsp;<span className="dim">PO/indent scan, drawing — header level</span>
-											</>
-										) : (
-											<span className="dim">Save the request first to attach a file.</span>
-										)}
+							<div className="span2">
+								<Field label="Attachment" hint="PO / indent scan, drawing — header level only">
+									<input
+										ref={fileRef}
+										type="file"
+										style={{ display: 'none' }}
+										onChange={(e) => {
+											const f = e.target.files?.[0];
+											e.target.value = '';
+											if (f) onPickFile(f);
+										}}
+									/>
+									<div
+										className={'upload' + (readOnly ? ' disabled' : '')}
+										onClick={() => !readOnly && fileRef.current?.click()}
+									>
+										<Icon name="download" size={20} style={{ transform: 'rotate(180deg)' }} />
+										<div>
+											{attachment ? (
+												<a href={attachment} target="_blank" rel="noreferrer" style={{ color: 'var(--iris)' }}>
+													View attached file
+												</a>
+											) : pendingFile ? (
+												<span>
+													<b>{pendingFile.name}</b> <span className="dim">— attaches on save</span>
+												</span>
+											) : uploading ? (
+												'Uploading…'
+											) : readOnly ? (
+												<span className="dim">No attachment.</span>
+											) : (
+												<span>
+													Drop a file or <span style={{ color: 'var(--iris)', fontWeight: 500 }}>browse</span>
+												</span>
+											)}
+										</div>
 									</div>
-								</div>
+								</Field>
 							</div>
 						</div>
 					</section>
 
 					<section className="card">
 						<div className="chead">
-							<div className="ttl">Items</div>
-							<div className="cnt">{lines.length} lines</div>
+							<Icon name="layers" size={16} />
+							<span className="ttl">Items</span>
+							<span className="cnt">{lines.length}</span>
 						</div>
 						{!readOnly && (
 							<div className="addwrap">
@@ -383,63 +372,80 @@ export function NewMaterialRequest() {
 								/>
 							</div>
 						)}
-						<div className="itemhead">
+						<div className="mrhead">
 							<span>#</span>
 							<span>Item</span>
 							<span>Sub-category</span>
 							<span>Qty</span>
 							<span>UOM</span>
-							<span>Specification</span>
 							<span>Required by</span>
 							<span />
 						</div>
 						{lines.length === 0 && (
-							<div className="empty" style={{ padding: '28px 18px' }}>
+							<div className="empty" style={{ padding: '26px 18px' }}>
 								<div className="t2">No items yet. {category ? 'Add items above.' : 'Pick a category first.'}</div>
 							</div>
 						)}
 						{lines.map((l, i) => (
-							<div className="itemrow" key={l.item_code}>
-								<span className="ix">{i + 1}</span>
-								<div className="iname">
-									<div className="t1">{l.item_name}</div>
-									<div className="t2">{l.item_code}</div>
-								</div>
-								<span>
-									{l.sub_category ? (
-										<span className="subpill">{l.sub_category}</span>
+							<div className="mrline" key={l.item_code}>
+								<div className="mrtop">
+									<span className="ix">{i + 1}</span>
+									<div className="iname">
+										<div className="t1">{l.item_name}</div>
+										<div className="t2">{l.item_code}</div>
+									</div>
+									<span>
+										{l.sub_category ? (
+											<span className="subpill">{l.sub_category}</span>
+										) : (
+											<span className="nosub">No sub-category</span>
+										)}
+									</span>
+									<input
+										className="inp mono"
+										value={l.qty}
+										disabled={readOnly}
+										inputMode="decimal"
+										onChange={(e) => setLine(i, { qty: e.target.value })}
+									/>
+									<input className="inp" value={l.uom} disabled />
+									<input
+										className="inp mono"
+										type="date"
+										value={l.schedule_date}
+										disabled={readOnly}
+										onChange={(e) => setLine(i, { schedule_date: e.target.value })}
+									/>
+									{!readOnly ? (
+										<button className="xbtn" onClick={() => removeLine(i)} aria-label="Remove item">
+											<Icon name="close" size={13} />
+										</button>
 									) : (
-										<span className="nosub">No sub-category</span>
+										<span />
 									)}
-								</span>
-								<input
-									className="inp mono"
-									value={l.qty}
-									disabled={readOnly}
-									inputMode="decimal"
-									onChange={(e) => setLine(i, { qty: e.target.value })}
-								/>
-								<input className="inp" value={l.uom} disabled />
-								<input
-									className="inp"
-									value={l.specification}
-									disabled={readOnly}
-									onChange={(e) => setLine(i, { specification: e.target.value })}
-								/>
-								<input
-									className="inp mono"
-									type="date"
-									value={l.schedule_date}
-									disabled={readOnly}
-									onChange={(e) => setLine(i, { schedule_date: e.target.value })}
-								/>
-								{!readOnly ? (
-									<button className="xbtn" onClick={() => removeLine(i)}>
-										×
-									</button>
-								) : (
-									<span />
-								)}
+								</div>
+								<div className="mrbot">
+									<div className="ff">
+										<span className="fl">Specification</span>
+										<input
+											className="inp"
+											value={l.specification}
+											disabled={readOnly}
+											placeholder="Grade, size, standard…"
+											onChange={(e) => setLine(i, { specification: e.target.value })}
+										/>
+									</div>
+									<div className="ff">
+										<span className="fl">Remark</span>
+										<input
+											className="inp"
+											value={l.remark}
+											disabled={readOnly}
+											placeholder="Line note…"
+											onChange={(e) => setLine(i, { remark: e.target.value })}
+										/>
+									</div>
+								</div>
 							</div>
 						))}
 					</section>
@@ -448,7 +454,8 @@ export function NewMaterialRequest() {
 				<div className="stack">
 					<section className="card">
 						<div className="chead">
-							<div className="ttl">Summary</div>
+							<Icon name="circle-check" size={16} />
+							<span className="ttl">Summary</span>
 						</div>
 						<div className="facts">
 							<div className="f">
@@ -457,7 +464,11 @@ export function NewMaterialRequest() {
 							</div>
 							<div className="f">
 								<span className="k">Project</span>
-								<span className="v">{project || '—'}</span>
+								<span className="v">{proj?.project_name || '—'}</span>
+							</div>
+							<div className="f">
+								<span className="k">Company</span>
+								<span className="v">{companyName || '—'}</span>
 							</div>
 							<div className="f">
 								<span className="k">Line items</span>
@@ -465,9 +476,7 @@ export function NewMaterialRequest() {
 							</div>
 							<div className="f">
 								<span className="k">Total qty</span>
-								<span className="v data">
-									{lines.reduce((s, l) => s + (Number(l.qty) || 0), 0)}
-								</span>
+								<span className="v data">{lines.reduce((s, l) => s + (Number(l.qty) || 0), 0)}</span>
 							</div>
 							<div className="f">
 								<span className="k">Priority</span>
@@ -478,7 +487,8 @@ export function NewMaterialRequest() {
 
 					<section className="card twk">
 						<div className="chead">
-							<div className="ttl">Category &amp; sub-category</div>
+							<Icon name="sparkle" size={16} />
+							<span className="ttl">Category &amp; sub-category</span>
 						</div>
 						<p>
 							Pick a <b>category</b> once. The item picker shows <b>every item in that category</b> —
