@@ -227,7 +227,11 @@ export function NewMaterialRequest() {
 					)}
 				</div>
 				<div className="spacer" />
-				{!readOnly && (
+				{/* New request → Save draft + Submit for approval. An EXISTING request
+				    is already in its workflow (e.g. Pending Approval), so collapse to a
+				    single "Save changes" and let DocLifecycleActions carry the real
+				    workflow actions (Approve / Reject / Reopen) — no redundant buttons. */}
+				{!readOnly && !isEdit && (
 					<>
 						<button className="btn" disabled={busy} onClick={() => save(false)}>
 							Save draft
@@ -237,6 +241,11 @@ export function NewMaterialRequest() {
 							{saving ? 'Saving…' : 'Submit for approval'}
 						</button>
 					</>
+				)}
+				{!readOnly && isEdit && (
+					<button className="btn" disabled={busy} onClick={() => save(false)}>
+						{saving ? 'Saving…' : 'Save changes'}
+					</button>
 				)}
 				{isEdit && detail && (
 					<DocLifecycleActions

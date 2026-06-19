@@ -1,10 +1,48 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
+import { useFrappeGetCall, useFrappePostCall, useFrappeFileUpload } from 'frappe-react-sdk';
 import { API, type PoReceiptItems, type ReceivablePo } from '../lib/api';
 import { Field, SearchSelect, TextArea } from '../components/form';
 import { Icon } from '../components/Icon';
 import { fmtMoney, parseServerError } from '../lib/format';
+
+/** Image picker tile (DUX .upload), used for the receipt material / invoice
+ *  photos. NOT a <label> — a label wrapping a hidden file input double-fires
+ *  the native picker. */
+function ImagePick({ label, file, hint, onPick }: { label: string; file: File | null; hint?: string; onPick: (f: File) => void }) {
+	const ref = useRef<HTMLInputElement>(null);
+	return (
+		<div className="field">
+			<span className="flabel">{label}</span>
+			<input
+				ref={ref}
+				type="file"
+				accept="image/*"
+				style={{ display: 'none' }}
+				onChange={(e) => {
+					const f = e.target.files?.[0];
+					e.target.value = '';
+					if (f) onPick(f);
+				}}
+			/>
+			<div className="upload" onClick={() => ref.current?.click()}>
+				<Icon name="download" size={20} style={{ transform: 'rotate(180deg)' }} />
+				<div>
+					{file ? (
+						<span>
+							<b>{file.name}</b> <span className="dim">— attaches on save</span>
+						</span>
+					) : (
+						<span>
+							Drop an image or <span style={{ color: 'var(--iris)', fontWeight: 500 }}>browse</span>
+						</span>
+					)}
+				</div>
+			</div>
+			{hint && <span className="fhint">{hint}</span>}
+		</div>
+	);
+}
 
 interface Line {
 	po_item: string;
@@ -32,6 +70,8 @@ export function NewReceipt() {
 	const [postingDate, setPostingDate] = useState(todayStr());
 	const [deliveryNote, setDeliveryNote] = useState('');
 	const [remark, setRemark] = useState('');
+	const [materialImage, setMaterialImage] = useState<File | null>(null);
+	const [invoiceImage, setInvoiceImage] = useState<File | null>(null);
 	const [err, setErr] = useState('');
 
 	const itemsRes = useFrappeGetCall<{ message: PoReceiptItems }>(
@@ -40,6 +80,7 @@ export function NewReceipt() {
 		po ? undefined : null,
 	);
 	const { call: createReceipt, loading: saving } = useFrappePostCall<{ message: { name: string } }>(API.createReceipt);
+	const { upload, loading: uploading } = useFrappeFileUpload();
 
 	useEffect(() => {
 		const msg = itemsRes.data?.message;
@@ -81,12 +122,20 @@ export function NewReceipt() {
 		if (lines.some((l) => Number(l.qty) > l.pending))
 			return setErr('Received quantity cannot exceed the pending quantity.');
 		try {
+			// Upload the receipt images first (private + unattached); the backend
+			// sets them on the PR before insert and attaches them to the receipt.
+			let materialUrl: string | null = null;
+			let invoiceUrl: string | null = null;
+			if (materialImage) materialUrl = (await upload(materialImage, { isPrivate: true })).file_url;
+			if (invoiceImage) invoiceUrl = (await upload(invoiceImage, { isPrivate: true })).file_url;
 			const res = await createReceipt({
 				data: {
 					purchase_order: po,
 					posting_date: postingDate,
 					supplier_delivery_note: deliveryNote || null,
 					remark: remark || null,
+					material_image: materialUrl,
+					invoice_image: invoiceUrl,
 					items,
 				},
 			});
@@ -111,9 +160,9 @@ export function NewReceipt() {
 					<h1 style={{ color: 'var(--fg-1)', fontFamily: 'var(--font-ui)' }}>New receipt</h1>
 				</div>
 				<div className="spacer" />
-				<button className="btn primary" disabled={saving || !po} onClick={() => void save()}>
+				<button className="btn primary" disabled={saving || uploading || !po} onClick={() => void save()}>
 					<Icon name="check" size={15} />
-					{saving ? 'Receiving…' : 'Create receipt'}
+					{uploading ? 'Uploading…' : saving ? 'Receiving…' : 'Create receipt'}
 				</button>
 			</div>
 
@@ -164,6 +213,18 @@ export function NewReceipt() {
 						<Field label="Supplier delivery note" hint="Supplier's challan / DN reference.">
 							<input className="inp" value={deliveryNote} onChange={(e) => setDeliveryNote(e.target.value)} placeholder="e.g. DN-00123" />
 						</Field>
+						<ImagePick
+							label="Image of material receipt"
+							file={materialImage}
+							hint="Photo of the received material — optional."
+							onPick={(f) => { setErr(''); setMaterialImage(f); }}
+						/>
+						<ImagePick
+							label="Image of invoice"
+							file={invoiceImage}
+							hint="Photo / scan of the supplier invoice — optional."
+							onPick={(f) => { setErr(''); setInvoiceImage(f); }}
+						/>
 						<div className="span2">
 							<Field label="Remark">
 								<TextArea value={remark} onChange={setRemark} rows={2} placeholder="Note for this receipt…" />

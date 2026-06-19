@@ -708,6 +708,16 @@ def create_receipt(data):
         pr.supplier_delivery_note = data.get("supplier_delivery_note")
     if data.get("remark") and pr.meta.has_field("custom_remark"):
         pr.custom_remark = data.get("remark")
+    # Receipt images (material / invoice) — uploaded private+unattached by the
+    # SPA, set on the Attach fields before insert (they are NOT allow_on_submit,
+    # so they must be set now), then attached to the PR after insert so the
+    # private-file permission follows the receipt.
+    material_image = data.get("material_image")
+    invoice_image = data.get("invoice_image")
+    if material_image and pr.meta.has_field("custom_add_material"):
+        pr.custom_add_material = material_image
+    if invoice_image and pr.meta.has_field("custom_add_invoice"):
+        pr.custom_add_invoice = invoice_image
 
     keep = []
     for it in pr.items:
@@ -723,7 +733,25 @@ def create_receipt(data):
 
     pr.insert()
     pr.submit()
+    for url, field in ((material_image, "custom_add_material"), (invoice_image, "custom_add_invoice")):
+        if url:
+            _attach_file_to_doc(url, "Purchase Receipt", pr.name, field)
     return {"name": pr.name}
+
+
+def _attach_file_to_doc(file_url, doctype, name, fieldname):
+    """Link an already-uploaded (unattached) File to a document so its
+    permission follows the doc and it shows in the attachments sidebar."""
+    fname = frappe.db.get_value("File", {"file_url": file_url}, "name")
+    if not fname:
+        return
+    f = frappe.get_doc("File", fname)
+    if f.attached_to_doctype and f.attached_to_name:
+        return
+    f.attached_to_doctype = doctype
+    f.attached_to_name = name
+    f.attached_to_field = fieldname
+    f.save(ignore_permissions=True)
 
 
 @frappe.whitelist()
