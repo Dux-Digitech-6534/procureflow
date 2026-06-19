@@ -12,33 +12,31 @@ import json
 
 import frappe
 from frappe import _
-from frappe.model.workflow import apply_workflow
+from frappe.model.workflow import apply_workflow, get_transitions
 from frappe.utils import flt, nowdate
 
 MR_TYPE = "Purchase"
 MR_PENDING_STATE = "Pending Approval"
 PRIORITIES = ["Low", "Medium", "High"]
 
-# Workflow actions by (doctype, state) -> [(action, role_allowed)], matching the
-# deployed workflow fixtures. Used to surface buttons fast (without loading every
-# doc); apply_workflow() is still the authority that enforces the transition.
-MR_ACTIONS = {
-    "Pending Approval": [("Approve", "Material Request Approval"), ("Reject", "Material Request Approval")],
-    "Rejected": [("Reopen", "Material Request Approval")],
-}
-PO_ACTIONS = {
-    "Draft": [("Send for Approval", "Purchase Officer"), ("Place Order", "Purchase Officer")],
-    "Pending": [("Place Order", "PO Approver"), ("Place Order", "Purchase Officer"), ("Reject", "PO Approver")],
+# States where a workflow action MAY be available for the current user; others
+# are terminal. We resolve the real actions via get_transitions(), which honours
+# both the user's roles AND the transition conditions (e.g. the PO workflow's
+# amount-based "<= 50000 place directly / > 50000 send for approval"). Computed
+# only for these states to avoid loading every row's doc.
+ACTIONABLE_STATES = {
+    "Material Request": {"Pending Approval", "Rejected"},
+    "Purchase Order": {"Draft", "Pending", "Rejected"},
 }
 
 
-def _wf_actions(doctype, state, roles):
-    amap = MR_ACTIONS if doctype == "Material Request" else PO_ACTIONS
-    out = []
-    for action, role in amap.get(state or "", []):
-        if role in roles and action not in out:
-            out.append(action)
-    return out
+def _doc_actions(doctype, name, state):
+    if state not in ACTIONABLE_STATES.get(doctype, set()):
+        return []
+    try:
+        return [t.action for t in get_transitions(frappe.get_doc(doctype, name))]
+    except Exception:
+        return []
 
 
 def _company():
@@ -209,7 +207,6 @@ def mr_list(search="", limit=100):
             limit_page_length=0,
         ):
             counts[r.parent] = counts.get(r.parent, 0) + 1
-    roles = set(frappe.get_roles())
     search = (search or "").strip().lower()
     out = []
     for r in rows:
@@ -218,7 +215,7 @@ def mr_list(search="", limit=100):
         ).lower():
             continue
         r["items"] = counts.get(r.name, 0)
-        r["actions"] = _wf_actions("Material Request", r.workflow_state, roles)
+        r["actions"] = _doc_actions("Material Request", r.name, r.workflow_state)
         out.append(r)
     return out
 
@@ -443,10 +440,9 @@ def po_list(limit=100):
             "Purchase Order Item", filters={"parent": ["in", names]}, fields=["parent"], limit_page_length=0
         ):
             counts[r.parent] = counts.get(r.parent, 0) + 1
-    roles = set(frappe.get_roles())
     for r in rows:
         r["items"] = counts.get(r.name, 0)
-        r["actions"] = _wf_actions("Purchase Order", r.workflow_state, roles)
+        r["actions"] = _doc_actions("Purchase Order", r.name, r.workflow_state)
     return rows
 
 
@@ -524,8 +520,6 @@ def apply_action(doctype, name, action, remark=""):
 @frappe.whitelist()
 def pending_approvals():
     """Docs awaiting THIS user's decision: MRs in Pending Approval, POs in Pending."""
-    roles = set(frappe.get_roles())
-
     mrs = []
     for r in frappe.get_all(
         "Material Request",
@@ -534,7 +528,7 @@ def pending_approvals():
         order_by="transaction_date asc",
         limit_page_length=200,
     ):
-        actions = _wf_actions("Material Request", MR_PENDING_STATE, roles)
+        actions = _doc_actions("Material Request", r.name, MR_PENDING_STATE)
         if actions:
             r["actions"] = actions
             mrs.append(r)
@@ -547,7 +541,7 @@ def pending_approvals():
         order_by="transaction_date asc",
         limit_page_length=200,
     ):
-        actions = _wf_actions("Purchase Order", "Pending", roles)
+        actions = _doc_actions("Purchase Order", r.name, "Pending")
         if actions:
             r["actions"] = actions
             pos.append(r)
