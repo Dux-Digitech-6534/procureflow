@@ -27,6 +27,7 @@ export const API = {
 	paymentList: 'procureflow.react_api.payment_list',
 	paymentDetail: 'procureflow.react_api.payment_detail',
 	docLinks: 'procureflow.react_api.doc_links',
+	settingsCanCreate: 'procureflow.react_api.settings_can_create',
 } as const;
 
 export interface ProjectOption {

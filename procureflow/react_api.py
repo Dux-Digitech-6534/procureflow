@@ -960,6 +960,17 @@ def payment_list(limit=100):
 
 
 @frappe.whitelist()
+def settings_can_create():
+    """Which master doctypes the current user may CREATE — so the Settings page
+    can hide the 'New' action (read-only) where the user lacks permission."""
+    dts = [
+        "Supplier", "Item", "Company Master", "Project Master",
+        "Material Category", "Material Sub Category", "Warehouse", "UOM",
+    ]
+    return {dt: bool(frappe.has_permission(dt, "create")) for dt in dts}
+
+
+@frappe.whitelist()
 def payment_detail(name):
     doc = frappe.get_doc("Procureflow Payment Entry", name)
     doc.check_permission("read")
