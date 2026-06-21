@@ -17,6 +17,7 @@ from frappe.utils import flt, nowdate
 
 MR_TYPE = "Purchase"
 MR_PENDING_STATE = "Pending Approval"
+MR_DRAFT_STATE = "Draft"
 PRIORITIES = ["Low", "Medium", "High"]
 
 # States where a workflow action MAY be available for the current user; others
@@ -25,16 +26,28 @@ PRIORITIES = ["Low", "Medium", "High"]
 # amount-based "<= 50000 place directly / > 50000 send for approval"). Computed
 # only for these states to avoid loading every row's doc.
 ACTIONABLE_STATES = {
-    "Material Request": {"Pending Approval", "Rejected"},
+    "Material Request": {"Draft", "Pending Approval", "Rejected"},
     "Purchase Order": {"Draft", "Pending", "Rejected"},
 }
+
+
+def _uniq(seq):
+    """Order-preserving de-dup. A state can have several transition rows for the
+    same action (one per allowed role), which would otherwise render duplicate
+    buttons (e.g. Draft -> 'Send for Approval' for Supervisor AND MR Creator)."""
+    seen, out = set(), []
+    for x in seq:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
 
 
 def _doc_actions(doctype, name, state):
     if state not in ACTIONABLE_STATES.get(doctype, set()):
         return []
     try:
-        return [t.action for t in get_transitions(frappe.get_doc(doctype, name))]
+        return _uniq(t.action for t in get_transitions(frappe.get_doc(doctype, name)))
     except Exception:
         return []
 
@@ -62,7 +75,7 @@ def _doc_action_state(doc):
     """
     transitions = []
     try:
-        transitions = [t.action for t in get_transitions(doc)]
+        transitions = _uniq(t.action for t in get_transitions(doc))
     except Exception:
         transitions = []
     can_cancel = bool(doc.docstatus == 1 and frappe.has_permission(doc.doctype, "cancel", doc))
@@ -151,6 +164,7 @@ def item_search(category, query="", limit=50):
 def save_material_request(data):
     data = _loads(data)
     name = data.get("name")
+    submit = bool(data.get("submit_for_approval"))
 
     if name:
         doc = frappe.get_doc("Material Request", name)
@@ -158,6 +172,17 @@ def save_material_request(data):
             frappe.throw(_("This Material Request is already submitted and cannot be edited."))
     else:
         doc = frappe.new_doc("Material Request")
+
+    # Mandatory fields (match the desk form). Category is always needed (it scopes
+    # the item picker); Project + Required-by + per-line qty are enforced when
+    # submitting for approval, so an incomplete request can still be parked as a Draft.
+    if not data.get("category"):
+        frappe.throw(_("Select a Category."))
+    if submit:
+        if not data.get("project"):
+            frappe.throw(_("Select a Project before submitting for approval."))
+        if not data.get("schedule_date"):
+            frappe.throw(_("Set the Required-by date before submitting for approval."))
 
     project = data.get("project")
     set_warehouse = (
@@ -176,7 +201,10 @@ def save_material_request(data):
     doc.custom_remark = data.get("remark")
     if not doc.get("custom_username"):
         doc.custom_username = frappe.session.user
-    doc.workflow_state = MR_PENDING_STATE
+    # New requests start as Draft; an existing doc keeps its current state so
+    # "Save changes" never silently re-submits (e.g. a Rejected MR stays Rejected).
+    if not doc.get("workflow_state"):
+        doc.workflow_state = MR_DRAFT_STATE
 
     doc.set("items", [])
     for row in data.get("items", []):
@@ -203,8 +231,20 @@ def save_material_request(data):
 
     if not doc.get("items"):
         frappe.throw(_("Add at least one item to the Material Request."))
+    if submit and any(flt(it.qty) <= 0 for it in doc.get("items")):
+        frappe.throw(_("Every item needs a quantity greater than zero before submitting for approval."))
 
     doc.save()
+
+    if submit:
+        # Resolve the live "send for approval" transition (Draft -> Pending
+        # Approval) honouring the user's roles; drafts never auto-jump on plain save.
+        forward = [t.action for t in get_transitions(doc) if "reject" not in (t.action or "").lower()]
+        if not forward:
+            frappe.throw(_("You do not have permission to submit this request for approval."))
+        apply_workflow(doc, forward[0])
+
+    doc.reload()
     return {"name": doc.name, "workflow_state": doc.workflow_state, "docstatus": doc.docstatus}
 
 

@@ -45,7 +45,11 @@ export function NewMaterialRequest() {
 		isEdit ? undefined : null,
 	);
 	const detail = detailRes.data?.message;
-	const readOnly = !!detail && detail.docstatus !== 0;
+	// Editable only as a brand-new request or while still a Draft. Once it's been
+	// sent for approval (Pending Approval / Rejected / Approved) the form is locked
+	// and the workflow actions take over (mirrors the PO page).
+	const editable = isEdit ? !!detail && detail.docstatus === 0 && detail.workflow_state === 'Draft' : true;
+	const readOnly = !editable;
 
 	const [category, setCategory] = useState('');
 	const [project, setProject] = useState('');
@@ -166,6 +170,8 @@ export function NewMaterialRequest() {
 		setErr('');
 		if (!category) return setErr('Pick a category first.');
 		if (strict) {
+			if (!project) return setErr('Select a project before submitting for approval.');
+			if (!requiredBy) return setErr('Set the required-by date before submitting for approval.');
 			if (lines.length === 0) return setErr('Add at least one item.');
 			if (lines.some((l) => !l.qty || Number(l.qty) <= 0))
 				return setErr('Every line needs a quantity greater than zero.');
@@ -178,6 +184,7 @@ export function NewMaterialRequest() {
 				priority,
 				schedule_date: requiredBy || null,
 				remark,
+				submit_for_approval: strict,
 				items: lines.map((l) => ({
 					item_code: l.item_code,
 					qty: Number(l.qty) || 0,
@@ -236,25 +243,19 @@ export function NewMaterialRequest() {
 					)}
 				</div>
 				<div className="spacer" />
-				{/* New request → Save draft + Submit for approval. An EXISTING request
-				    is already in its workflow (e.g. Pending Approval), so collapse to a
-				    single "Save changes" and let DocLifecycleActions carry the real
-				    workflow actions (Approve / Reject / Reopen) — no redundant buttons. */}
-				{!readOnly && !isEdit && (
+				{/* New or Draft → Save draft + Submit for approval. Once it leaves Draft
+				    the form is locked and DocLifecycleActions carries the workflow actions
+				    (Approve / Reject / Reopen / Cancel / Amend). */}
+				{editable && (
 					<>
 						<button className="btn" disabled={busy} onClick={() => save(false)}>
-							Save draft
+							{saving ? 'Saving…' : 'Save draft'}
 						</button>
 						<button className="btn primary" disabled={busy} onClick={() => save(true)}>
 							<Icon name="check" size={15} />
 							{saving ? 'Saving…' : 'Submit for approval'}
 						</button>
 					</>
-				)}
-				{!readOnly && isEdit && (
-					<button className="btn" disabled={busy} onClick={() => save(false)}>
-						{saving ? 'Saving…' : 'Save changes'}
-					</button>
 				)}
 				{isEdit && detail?.can_create_po && (
 					<button
@@ -265,7 +266,7 @@ export function NewMaterialRequest() {
 						<Icon name="cube" size={15} /> Create purchase order
 					</button>
 				)}
-				{isEdit && detail && (
+				{isEdit && detail && !editable && (
 					<DocLifecycleActions
 						doctype="Material Request"
 						name={detail.name}
@@ -306,7 +307,7 @@ export function NewMaterialRequest() {
 									options={(ctx?.categories ?? []).map((c) => ({ value: c }))}
 								/>
 							</Field>
-							<Field label="Project" hint="Store / warehouse and company auto-fill from the project.">
+							<Field label="Project" required hint="Store / warehouse and company auto-fill from the project.">
 								<SearchSelect
 									value={project}
 									onChange={setProject}
@@ -330,7 +331,7 @@ export function NewMaterialRequest() {
 									options={(ctx?.priorities ?? ['Low', 'Medium', 'High']).map((p) => ({ value: p }))}
 								/>
 							</Field>
-							<Field label="Required by">
+							<Field label="Required by" required>
 								<input
 									className="inp mono"
 									type="date"

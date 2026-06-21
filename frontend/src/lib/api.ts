@@ -167,6 +167,7 @@ export function mrDisplayStatus(r: {
 		}
 	}
 	if (r.workflow_state === 'Rejected') return { label: 'Rejected', tone: 'err' };
+	if (r.workflow_state === 'Draft') return { label: 'Draft', tone: 'neutral' };
 	return { label: 'Pending approval', tone: 'pend' };
 }
 
