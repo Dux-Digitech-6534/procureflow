@@ -248,6 +248,7 @@ export interface PoLine {
 	remark: string | null;
 	schedule_date: string | null;
 	material_request: string | null;
+	material_request_item: string | null;
 	sub_category: string | null;
 }
 

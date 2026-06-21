@@ -273,11 +273,13 @@ def save_material_request(data):
 
     if submit:
         # Resolve the live "send for approval" transition (Draft -> Pending
-        # Approval) honouring the user's roles; drafts never auto-jump on plain save.
+        # Approval) honouring the user's roles. If the user cannot send for
+        # approval (no forward transition), DO NOT throw — that would roll back
+        # the whole request (the just-saved draft would be lost). Instead leave
+        # it saved as a Draft; the caller reports the actual resulting state.
         forward = [t.action for t in get_transitions(doc) if "reject" not in (t.action or "").lower()]
-        if not forward:
-            frappe.throw(_("You do not have permission to submit this request for approval."))
-        apply_workflow(doc, forward[0])
+        if forward:
+            apply_workflow(doc, forward[0])
 
     doc.reload()
     return {"name": doc.name, "workflow_state": doc.workflow_state, "docstatus": doc.docstatus}
@@ -446,13 +448,19 @@ def mr_items_for_po(material_request):
     out = []
     umap = _item_uoms_map([it.item_code for it in doc.items])
     for it in doc.items:
+        # Remaining qty in the line's transaction UOM. ordered_qty accumulates in
+        # STOCK units (ERPNext maps PO Item.stock_qty -> MR Item.ordered_qty), so
+        # subtract in stock units then convert back via conversion_factor.
+        cf = flt(it.conversion_factor) or 1
+        remaining_stock = flt(it.stock_qty) - flt(it.ordered_qty)
+        remaining = (remaining_stock / cf) if remaining_stock > 0 else 0
         out.append(
             {
                 "item_code": it.item_code,
                 "item_name": it.item_name,
                 "uom": it.uom,
                 "uoms": umap.get(it.item_code) or [{"uom": it.uom, "conversion_factor": 1}],
-                "qty": flt(it.qty) - flt(it.ordered_qty),
+                "qty": remaining,
                 "specification": it.get("custom_specification"),
                 "remark": it.get("custom_remark"),
                 "material_request": doc.name,
@@ -543,10 +551,12 @@ def save_purchase_order(data):
         # Officer sees "Place Order" (grand_total <= 50000 -> submitted/Approved
         # directly) OR "Send for Approval" (> 50000 -> Pending). get_transitions
         # honours both the amount condition and the user's roles.
+        # If the user cannot place/submit (no forward transition), leave the PO
+        # as a saved Draft rather than throwing — throwing would roll back the
+        # just-saved draft and lose the user's work. The caller reports the state.
         forward = [t.action for t in get_transitions(doc) if "reject" not in (t.action or "").lower()]
-        if not forward:
-            frappe.throw(_("You do not have permission to place or submit this order."))
-        apply_workflow(doc, forward[0])
+        if forward:
+            apply_workflow(doc, forward[0])
 
     doc.reload()
     return {"name": doc.name, "workflow_state": doc.workflow_state, "docstatus": doc.docstatus}
@@ -608,6 +618,7 @@ def po_detail(name):
                 "remark": it.get("custom_remark"),
                 "schedule_date": it.schedule_date,
                 "material_request": it.get("material_request"),
+                "material_request_item": it.get("material_request_item"),
                 "sub_category": frappe.db.get_value("Item", it.item_code, "custom_sub_category"),
             }
         )

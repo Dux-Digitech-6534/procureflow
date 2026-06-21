@@ -201,7 +201,9 @@ export function NewMaterialRequest() {
 			};
 			const res = await saveMr({ data: payload });
 			const newName = res.message.name;
-			toast.success(strict ? 'Material request submitted for approval' : 'Draft saved');
+			// Reflect the actual resulting state (a submit the user can't perform
+			// stays a Draft — report it honestly rather than "submitted").
+			toast.success(res.message.workflow_state === 'Pending Approval' ? 'Material request submitted for approval' : 'Draft saved');
 			if (pendingFile && !id) {
 				try {
 					await uploadTo(newName, pendingFile);

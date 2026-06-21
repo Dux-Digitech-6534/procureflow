@@ -46,6 +46,14 @@ const round = (n: number, d = 2) => {
 	const f = 10 ** d;
 	return Math.round(n * f) / f;
 };
+// Round to a whole rupee using banker's rounding (half-to-even) to match
+// ERPNext's frappe.utils.rounded(); plain Math.round (half-up) would show a
+// total 1 rupee too high on .5-over-even amounts (e.g. 76.50).
+const bankersRound = (x: number) => {
+	const floor = Math.floor(x);
+	if (Math.abs(x - floor - 0.5) < 1e-9) return floor % 2 === 0 ? floor : floor + 1;
+	return Math.round(x);
+};
 
 export function NewPurchaseOrder() {
 	const { id } = useParams();
@@ -126,7 +134,7 @@ export function NewPurchaseOrder() {
 					remark: it.remark ?? '',
 					schedule_date: it.schedule_date ?? '',
 					material_request: it.material_request ?? null,
-					material_request_item: null,
+					material_request_item: it.material_request_item ?? null,
 				})),
 			);
 			setSeeded(true);
@@ -253,10 +261,12 @@ export function NewPurchaseOrder() {
 	const net = lines.reduce((s, l) => s + num(l.qty) * num(l.rate), 0);
 	const gstTotal = isNoGst ? 0 : lines.reduce((s, l) => s + (num(l.qty) * num(l.rate) * num(l.gst)) / 100, 0);
 	const grand = net + gstTotal;
-	// Round-off to whole rupees (mirrors ERPNext's rounded_total). Show the
-	// adjustment as its own line; the payable Grand total is the rounded figure.
-	const roundedGrand = Math.round(grand);
-	const roundOff = round(roundedGrand - grand, 2);
+	// Round-off to whole rupees. For a saved (read-only) PO show the server's
+	// authoritative rounded_total/rounding_adjustment; for an editable/new PO
+	// mirror ERPNext's banker's rounding on the live total.
+	const useServerRound = !!detail && !editable && detail.rounded_total != null;
+	const roundedGrand = useServerRound ? (detail!.rounded_total as number) : bankersRound(grand);
+	const roundOff = useServerRound ? (detail!.rounding_adjustment ?? 0) : round(roundedGrand - grand, 2);
 	const overThreshold = grand > AMOUNT_THRESHOLD;
 	const hasGst = gstTotal > 0;
 	// Source material request(s): derived from the lines (covers new / from-MR /
@@ -306,7 +316,8 @@ export function NewPurchaseOrder() {
 				})),
 			};
 			const res = await savePo({ data: payload });
-			toast.success(strict ? (overThreshold ? 'Sent for approval' : 'Purchase order placed') : 'Draft saved');
+			const st = res.message.workflow_state;
+			toast.success(st === 'Approved' ? 'Purchase order placed' : st === 'Pending' ? 'Sent for approval' : 'Draft saved');
 			// When editing an existing PO we stay on the same URL, so React Router
 			// won't refetch — revalidate the detail so the new workflow state (e.g.
 			// Draft -> Approved after "Place order") and its buttons update without a

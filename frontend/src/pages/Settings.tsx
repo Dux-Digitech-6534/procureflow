@@ -606,9 +606,11 @@ function ItemModal({
 /* --------------------------------- Settings --------------------------------- */
 
 export function Settings() {
-	const { data } = useFrappeGetCall<{ message: Record<string, boolean> }>(API.settingsCanCreate, {});
+	const { data, isLoading } = useFrappeGetCall<{ message: Record<string, boolean> }>(API.settingsCanCreate, {});
 	const can = data?.message ?? {};
-	const allow = (dt: string) => can[dt] !== false; // default to allowed until perms load
+	// Fail safe: keep panels read-only until perms are known, so we never flash a
+	// "New" action the user can't actually use.
+	const allow = (dt: string) => !isLoading && can[dt] === true;
 
 	return (
 		<main>
