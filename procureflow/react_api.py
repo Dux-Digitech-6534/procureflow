@@ -553,6 +553,8 @@ def po_detail(name):
         "net_total": doc.net_total,
         "total_taxes": doc.total_taxes_and_charges,
         "grand_total": doc.grand_total,
+        "rounding_adjustment": doc.get("rounding_adjustment"),
+        "rounded_total": doc.get("rounded_total"),
         "taxes": taxes,
         "items": items,
         "print_format": PO_PRINT_FORMAT,

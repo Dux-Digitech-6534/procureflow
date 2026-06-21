@@ -238,6 +238,10 @@ export function NewPurchaseOrder() {
 	const net = lines.reduce((s, l) => s + num(l.qty) * num(l.rate), 0);
 	const gstTotal = lines.reduce((s, l) => s + (num(l.qty) * num(l.rate) * num(l.gst)) / 100, 0);
 	const grand = net + gstTotal;
+	// Round-off to whole rupees (mirrors ERPNext's rounded_total). Show the
+	// adjustment as its own line; the payable Grand total is the rounded figure.
+	const roundedGrand = Math.round(grand);
+	const roundOff = round(roundedGrand - grand, 2);
 	const overThreshold = grand > AMOUNT_THRESHOLD;
 	const hasGst = gstTotal > 0;
 	const breakdown =
@@ -570,9 +574,15 @@ export function NewPurchaseOrder() {
 								<span className="v">{fmtMoney(b.v, 'INR')}</span>
 							</div>
 						))}
+						{Math.abs(roundOff) >= 0.005 && (
+							<div className="taxrow">
+								<span className="k">Round-off</span>
+								<span className="v">{roundOff > 0 ? '+' : ''}{fmtMoney(roundOff, 'INR')}</span>
+							</div>
+						)}
 						<div className="taxrow grand">
 							<span className="k">Grand total</span>
-							<span className="v">{fmtMoney(grand, 'INR')}</span>
+							<span className="v">{fmtMoney(roundedGrand, 'INR')}</span>
 						</div>
 					</div>
 				</section>

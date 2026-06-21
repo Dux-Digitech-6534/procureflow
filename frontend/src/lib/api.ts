@@ -163,7 +163,7 @@ export function mrDisplayStatus(r: {
 			case 'Partially Ordered':
 				return { label: 'Partially ordered', tone: 'pend' };
 			default: // "Pending" = approved, nothing ordered yet
-				return { label: 'Approved', tone: 'pend' };
+				return { label: 'Approved', tone: 'ok' };
 		}
 	}
 	if (r.workflow_state === 'Rejected') return { label: 'Rejected', tone: 'err' };
@@ -262,6 +262,8 @@ export interface PoDetail extends DocActionState {
 	net_total: number;
 	total_taxes: number;
 	grand_total: number;
+	rounding_adjustment: number | null;
+	rounded_total: number | null;
 	taxes: PoTaxRow[];
 	items: PoLine[];
 	print_format: string | null;
