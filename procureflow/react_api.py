@@ -346,7 +346,7 @@ def mr_detail(name):
 # ===========================================================================
 
 PO_DRAFT_STATE = "Draft"
-TAX_TYPES = ["Intra-State (CGST + SGST)", "Inter-State (IGST)"]
+TAX_TYPES = ["Intra-State (CGST + SGST)", "Inter-State (IGST)", "Unregistered / No GST"]
 # Custom ERPNext print format for the PO (carries the company-linked signature
 # set by the before_submit hook in signature_api). Used by the SPA's Print button.
 PO_PRINT_FORMAT = "Sanskruti PO Print Format"

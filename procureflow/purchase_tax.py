@@ -23,6 +23,7 @@ from frappe.utils import flt
 
 TAX_TYPE_INTRA = "Intra-State (CGST + SGST)"
 TAX_TYPE_INTER = "Inter-State (IGST)"
+TAX_TYPE_NONE = "Unregistered / No GST"
 
 # (key, account_name) -> account name gets the " - <abbr>" company suffix appended.
 GST_ACCOUNT_DEFS = (
@@ -207,6 +208,20 @@ def _is_tax_account(account):
 def _apply_gst_taxes(doc):
     company = doc.company
     if not company:
+        return
+
+    # Unregistered dealer -> NO GST at all. Zero every line's GST, strip any
+    # tax-account rows, and recalc so grand_total == net_total.
+    if doc.get("custom_tax_type") == TAX_TYPE_NONE:
+        for item in doc.get("items", []):
+            item.custom_gst_percent = 0
+            if item.get("item_tax_template"):
+                item.item_tax_template = None
+            if item.get("item_tax_rate") and item.item_tax_rate not in ("{}", ""):
+                item.item_tax_rate = "{}"
+            item.custom_rate_with_tax = flt(item.rate, 2)
+        doc.set("taxes", [t for t in doc.get("taxes", []) if not _is_tax_account(t.account_head)])
+        _recalculate(doc)
         return
 
     accounts = get_gst_accounts(company)

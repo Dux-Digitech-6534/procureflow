@@ -21,6 +21,7 @@ const AMOUNT_THRESHOLD = 50000;
 
 const INTRA = 'Intra-State (CGST + SGST)';
 const INTER = 'Inter-State (IGST)';
+const NONE = 'Unregistered / No GST';
 
 interface Line {
 	item_code: string;
@@ -155,6 +156,13 @@ export function NewPurchaseOrder() {
 		}
 	}
 
+	function onTaxType(v: string) {
+		setTaxType(v);
+		// Unregistered / No GST: clear any per-line GST so the form matches the
+		// saved doc (the backend zeroes GST for this tax type anyway).
+		if (v === NONE) setLines((ls) => ls.map((l) => ({ ...l, gst: '', rwt: l.rate })));
+	}
+
 	async function appendItems(rows: { item_code: string; item_name: string; uom: string; sub_category: string | null; qty?: number; specification?: string | null; remark?: string | null; material_request?: string | null; material_request_item?: string | null }[]) {
 		const fresh = rows.filter((r) => !lines.some((l) => l.item_code === r.item_code));
 		const built: Line[] = fresh.map((r) => ({
@@ -235,8 +243,9 @@ export function NewPurchaseOrder() {
 		setLines((ls) => ls.filter((_, idx) => idx !== i));
 	}
 
+	const isNoGst = taxType === NONE;
 	const net = lines.reduce((s, l) => s + num(l.qty) * num(l.rate), 0);
-	const gstTotal = lines.reduce((s, l) => s + (num(l.qty) * num(l.rate) * num(l.gst)) / 100, 0);
+	const gstTotal = isNoGst ? 0 : lines.reduce((s, l) => s + (num(l.qty) * num(l.rate) * num(l.gst)) / 100, 0);
 	const grand = net + gstTotal;
 	// Round-off to whole rupees (mirrors ERPNext's rounded_total). Show the
 	// adjustment as its own line; the payable Grand total is the rounded figure.
@@ -244,8 +253,9 @@ export function NewPurchaseOrder() {
 	const roundOff = round(roundedGrand - grand, 2);
 	const overThreshold = grand > AMOUNT_THRESHOLD;
 	const hasGst = gstTotal > 0;
-	const breakdown =
-		taxType === INTER
+	const breakdown = isNoGst
+		? []
+		: taxType === INTER
 			? [{ k: 'IGST', v: gstTotal }]
 			: taxType === INTRA
 				? [{ k: 'CGST', v: gstTotal / 2 }, { k: 'SGST', v: gstTotal / 2 }]
@@ -447,11 +457,11 @@ export function NewPurchaseOrder() {
 						>
 							<SelectInput
 								value={taxType}
-								onChange={setTaxType}
+								onChange={onTaxType}
 								disabled={readOnly}
 								allowEmpty
 								placeholder="Select…"
-								options={(ctx?.tax_types ?? [INTRA, INTER]).map((t) => ({ value: t }))}
+								options={(ctx?.tax_types ?? [INTRA, INTER, NONE]).map((t) => ({ value: t }))}
 							/>
 						</Field>
 						<Field label="Required by">
@@ -525,8 +535,8 @@ export function NewPurchaseOrder() {
 								<input className="inp mono" value={l.qty} disabled={readOnly} inputMode="decimal" onChange={(e) => setLineCalc(i, 'qty', e.target.value)} />
 								<input className="inp" value={l.uom} disabled />
 								<input className="inp mono" value={l.rate} disabled={readOnly} inputMode="decimal" placeholder="0.00" onChange={(e) => setLineCalc(i, 'rate', e.target.value)} />
-								<input className="inp mono" value={l.gst} disabled={readOnly} inputMode="decimal" placeholder="0" onChange={(e) => setLineCalc(i, 'gst', e.target.value)} />
-								<input className="inp mono" value={l.rwt} disabled={readOnly} inputMode="decimal" placeholder="0.00" onChange={(e) => setLineCalc(i, 'rwt', e.target.value)} />
+								<input className="inp mono" value={isNoGst ? '' : l.gst} disabled={readOnly || isNoGst} inputMode="decimal" placeholder="0" onChange={(e) => setLineCalc(i, 'gst', e.target.value)} />
+								<input className="inp mono" value={isNoGst ? l.rate : l.rwt} disabled={readOnly || isNoGst} inputMode="decimal" placeholder="0.00" onChange={(e) => setLineCalc(i, 'rwt', e.target.value)} />
 								<span className="amt">{fmtMoney(num(l.qty) * num(l.rate), 'INR')}</span>
 								{!readOnly ? (
 									<button className="xbtn" onClick={() => removeLine(i)} aria-label="Remove">
