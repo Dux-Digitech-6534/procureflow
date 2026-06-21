@@ -6,7 +6,9 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "company_name"
+  "company_name",
+  "company_address",
+  "shipping_address"
  ],
  "fields": [
   {
@@ -14,6 +16,18 @@
    "fieldtype": "Data",
    "label": "Company Name",
    "unique": 1
+  },
+  {
+   "fieldname": "company_address",
+   "fieldtype": "Small Text",
+   "label": "Company / Billing Address",
+   "description": "Head-office address printed on the PO letterhead under the company name."
+  },
+  {
+   "fieldname": "shipping_address",
+   "fieldtype": "Small Text",
+   "label": "Shipping / Site Address",
+   "description": "Delivery / project-site address printed in the PO Shipping Address block."
   }
  ],
  "grid_page_length": 50,

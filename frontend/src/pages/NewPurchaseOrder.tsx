@@ -227,6 +227,13 @@ export function NewPurchaseOrder() {
 			const res = await fetchMrItems({ material_request: mrName });
 			const msg = res?.message;
 			if (!msg) return;
+			// One project per PO — refuse a material request from another project.
+			if (fromMr && project && msg.project && msg.project !== project) {
+				setErr(
+					`That material request belongs to “${msg.project}”. A purchase order can include requests from only one project (“${project}”).`,
+				);
+				return;
+			}
 			if (msg.category) setCategory(msg.category);
 			if (msg.project) setProject(msg.project);
 			await appendItems(msg.items);
@@ -276,6 +283,20 @@ export function NewPurchaseOrder() {
 		return fromLines.length ? fromLines : detail?.material_requests ?? [];
 	}, [lines, detail]);
 	const fromMr = sourceMrs.length > 0;
+	// MR picker: drop already-added MRs, and once a project is locked (from the
+	// first MR) show only that project's requests — a PO can't mix projects.
+	const mrPickerOptions = useMemo(
+		() =>
+			approvedMrs
+				.filter((m) => !sourceMrs.includes(m.name))
+				.filter((m) => !fromMr || m.custom_select_project_ === project)
+				.map((m) => ({
+					value: m.name,
+					label: m.name,
+					sub: [m.custom_category, m.custom_select_project_].filter(Boolean).join(' · '),
+				})),
+		[approvedMrs, sourceMrs, fromMr, project],
+	);
 	const breakdown = isNoGst
 		? []
 		: taxType === INTER
@@ -468,18 +489,14 @@ export function NewPurchaseOrder() {
 							<div className="span2">
 								<Field
 									label="Start from a material request"
-									hint="Pull an approved MR's items, project & category in one step — or build the order from scratch below. Optional."
+									hint={fromMr ? `A PO can include requests from one project only — showing requests for “${project}”.` : "Pull an approved MR's items, project & category in one step — or build the order from scratch below. Optional."}
 								>
 									<SearchSelect
 										value={''}
 										onChange={pullFromMr}
-										placeholder={approvedMrs.length ? 'Pick an approved material request…' : 'No material requests pending order'}
-										disabled={approvedMrs.length === 0}
-										options={approvedMrs.map((m) => ({
-											value: m.name,
-											label: m.name,
-											sub: [m.custom_category, m.custom_select_project_].filter(Boolean).join(' · '),
-										}))}
+										placeholder={mrPickerOptions.length ? 'Pick an approved material request…' : fromMr ? `No more requests for ${project}` : 'No material requests pending order'}
+										disabled={mrPickerOptions.length === 0}
+										options={mrPickerOptions}
 									/>
 								</Field>
 							</div>

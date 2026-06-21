@@ -19,6 +19,27 @@ export function fmtMoney(value: number | null | undefined, currency?: string | n
 	return `${negative ? '−' : ''}${symbol}${grouped}`;
 }
 
+/** Compact INR for dashboards: ₹1.18 Cr / ₹4.5 L / ₹12.3 K / ₹940. */
+export function fmtCompact(value: number | null | undefined, currency = 'INR'): string {
+	if (value === null || value === undefined || Number.isNaN(value)) return '—';
+	const symbol = CURRENCY_SYMBOLS[currency] ?? '';
+	const neg = value < 0;
+	const n = Math.abs(value);
+	let body: string;
+	if (n >= 1e7) body = `${(n / 1e7).toFixed(2)} Cr`;
+	else if (n >= 1e5) body = `${(n / 1e5).toFixed(2)} L`;
+	else if (n >= 1e3) body = `${(n / 1e3).toFixed(1)} K`;
+	else body = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(n);
+	return `${neg ? '−' : ''}${symbol}${body}`;
+}
+
+/** "12.3%" — percentage; withSign prefixes "+" for positives. */
+export function fmtPercent(value: number | null | undefined, decimals = 1, withSign = false): string {
+	if (value === null || value === undefined || Number.isNaN(value)) return '—';
+	const s = value.toFixed(decimals);
+	return `${withSign && value > 0 ? '+' : ''}${s}%`;
+}
+
 /** Plain number with Indian grouping and up to 3 decimals (quantities). */
 export function fmtNum(value: number | null | undefined, decimals = 2): string {
 	if (value === null || value === undefined || Number.isNaN(value)) return '—';

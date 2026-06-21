@@ -8,7 +8,8 @@
  "field_order": [
   "company_name",
   "project_name",
-  "store_name"
+  "store_name",
+  "shipping_address"
  ],
  "fields": [
   {
@@ -28,6 +29,12 @@
    "fieldtype": "Link",
    "label": "Company Name",
    "options": "Company Master"
+  },
+  {
+   "fieldname": "shipping_address",
+   "fieldtype": "Small Text",
+   "label": "Shipping / Site Address",
+   "description": "Delivery / project-site address printed in the PO Shipping Address block (overrides the company-level shipping address)."
   }
  ],
  "grid_page_length": 50,

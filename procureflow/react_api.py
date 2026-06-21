@@ -495,6 +495,24 @@ def save_purchase_order(data):
     set_warehouse = frappe.db.get_value("Project Master", project, "store_name") if project else None
     company_master = frappe.db.get_value("Project Master", project, "company_name") if project else None
 
+    # One project per PO: every source material request must belong to the same
+    # project (and therefore the same company). Mixing material requests from
+    # different projects on one Purchase Order is not allowed.
+    src_mrs = {row.get("material_request") for row in data.get("items", []) if row.get("material_request")}
+    if src_mrs:
+        mr_proj = {mr: frappe.db.get_value("Material Request", mr, "custom_select_project_") for mr in src_mrs}
+        distinct = {p for p in mr_proj.values() if p}
+        if len(distinct) > 1:
+            frappe.throw(_(
+                "A Purchase Order can include material requests from only one project. "
+                "These requests belong to different projects: {0}."
+            ).format(", ".join(f"{mr} → {proj or '—'}" for mr, proj in sorted(mr_proj.items()))))
+        if distinct and project and next(iter(distinct)) != project:
+            frappe.throw(_(
+                "The Purchase Order project ({0}) does not match the project of its "
+                "material requests ({1})."
+            ).format(project, next(iter(distinct))))
+
     doc.supplier = supplier
     doc.company = _company()
     doc.transaction_date = nowdate()
@@ -1090,3 +1108,483 @@ def doc_links(doctype, name):
         groups.append({"kind": kind, "label": label, "route": route, "items": [build(n) for n in names]})
 
     return {"groups": groups}
+
+
+# ============================================================
+# REPORTS — one dispatcher (report_data) + XLSX export, sharing row builders.
+# All scope-aware (a non-privileged user only sees their permitted projects).
+# ============================================================
+from collections import defaultdict
+from procureflow import dashboard_api as _D
+from frappe.utils import getdate
+
+
+def _report_scope_projects():
+    scope = _D.get_dashboard_scope()
+    return None if scope.get("see_all") else (scope.get("projects") or [])
+
+
+def _norm(kwargs):
+    g = kwargs.get
+    return {"from_date": g("from_date") or None, "to_date": g("to_date") or None,
+            "project": g("project") or None, "supplier": g("supplier") or None,
+            "category": g("category") or None, "state": g("state") or None,
+            "item": g("item") or None, "bucket": g("bucket") or None,
+            "search": (g("search") or "").strip() or None}
+
+
+def _date_between(filters, field, fd, td):
+    if fd and td:
+        filters[field] = ["between", [fd, td]]
+    elif fd:
+        filters[field] = [">=", fd]
+    elif td:
+        filters[field] = ["<=", td]
+
+
+def _scope_project(filters, project_field, requested):
+    allowed = _report_scope_projects()
+    if allowed is not None:
+        if requested and requested in allowed:
+            filters[project_field] = requested
+        elif allowed:
+            filters[project_field] = ["in", allowed]
+        else:
+            filters[project_field] = "__no_access__"
+    elif requested:
+        filters[project_field] = requested
+
+
+# ---- builders: each takes the normalised filter dict, returns the FULL row list ----
+
+def _rb_po_register(f):
+    filters = {"docstatus": ["<", 2]}
+    _date_between(filters, "transaction_date", f["from_date"], f["to_date"])
+    if f["supplier"]:
+        filters["supplier"] = f["supplier"]
+    if f["category"]:
+        filters["custom_category"] = f["category"]
+    if f["state"]:
+        filters["workflow_state"] = f["state"]
+    _scope_project(filters, "custom_project_name", f["project"])
+    or_filters = None
+    if f["search"]:
+        s = "%" + f["search"] + "%"
+        or_filters = {"name": ["like", s], "supplier": ["like", s], "custom_project_name": ["like", s]}
+    rows = frappe.get_all("Purchase Order", filters=filters, or_filters=or_filters,
+                          fields=["name", "transaction_date", "supplier", "custom_project_name",
+                                  "custom_test_company_", "custom_category", "custom_priority",
+                                  "total", "total_taxes_and_charges", "grand_total", "rounded_total",
+                                  "custom_tax_type", "per_received", "workflow_state", "status", "owner"],
+                          order_by="transaction_date desc, creation desc", limit_page_length=0)
+    for r in rows:
+        r["grand_total"] = flt(r.get("rounded_total")) or flt(r.get("grand_total"))
+    return rows
+
+
+def _rb_mr_register(f):
+    filters = {"material_request_type": "Purchase", "docstatus": ["<", 2]}
+    _date_between(filters, "transaction_date", f["from_date"], f["to_date"])
+    if f["category"]:
+        filters["custom_category"] = f["category"]
+    if f["state"]:
+        filters["workflow_state"] = f["state"]
+    _scope_project(filters, "custom_select_project_", f["project"])
+    or_filters = None
+    if f["search"]:
+        s = "%" + f["search"] + "%"
+        or_filters = {"name": ["like", s], "custom_select_project_": ["like", s]}
+    return frappe.get_all("Material Request", filters=filters, or_filters=or_filters,
+                          fields=["name", "transaction_date", "schedule_date", "custom_select_project_",
+                                  "custom_category", "custom_priority", "owner", "per_ordered",
+                                  "workflow_state", "status"],
+                          order_by="transaction_date desc, creation desc", limit_page_length=0)
+
+
+def _rb_grn_register(f):
+    pf = _D.get_payment_dashboard_filters(project=f["project"], supplier=f["supplier"],
+                                          from_date=f["from_date"], to_date=f["to_date"],
+                                          search=f["search"], limit=1000)
+    return _D.get_payment_dashboard_receipts(pf, limit=10000)
+
+
+def _rb_payment_worklist(f):
+    rows = [r for r in _rb_grn_register(f) if flt(r.get("outstanding_amount")) > 0]
+    rows.sort(key=lambda r: (r.get("receipt_date") or ""))
+    return rows
+
+
+def _rb_outstanding_ageing(f):
+    today = getdate(nowdate())
+    out = []
+    for r in _rb_grn_register(f):
+        o = flt(r.get("outstanding_amount"))
+        if o <= 0:
+            continue
+        rd = r.get("receipt_date")
+        days = (today - getdate(rd)).days if rd else 0
+        bucket = "0-30" if days <= 30 else "31-60" if days <= 60 else "61-90" if days <= 90 else "90+"
+        out.append({**r, "days_outstanding": days, "bucket": bucket})
+    want = f.get("bucket")
+    if want and want != "all":
+        out = [r for r in out if r["bucket"] == want]
+    out.sort(key=lambda r: -r["days_outstanding"])
+    return out
+
+
+def _rb_payment_register(f):
+    filters = _D.get_dashboard_filters(project=f["project"], from_date=f["from_date"], to_date=f["to_date"])
+    cond = ["pe.docstatus = 1"]
+    vals = {}
+    if f["from_date"] and f["to_date"]:
+        cond.append("pe.payment_date between %(fd)s and %(td)s")
+        vals["fd"] = f["from_date"]
+        vals["td"] = f["to_date"]
+    if f["supplier"]:
+        cond.append("pr.supplier = %(sup)s")
+        vals["sup"] = f["supplier"]
+    scope = filters.get("scope") or {}
+    if not scope.get("see_all", True):
+        allowed = scope.get("projects") or ["__no_access__"]
+        if f["project"] and f["project"] in allowed:
+            cond.append("pr.custom_project_name = %(pj)s")
+            vals["pj"] = f["project"]
+        else:
+            cond.append("pr.custom_project_name in %(pjs)s")
+            vals["pjs"] = tuple(allowed)
+    elif f["project"]:
+        cond.append("pr.custom_project_name = %(pj)s")
+        vals["pj"] = f["project"]
+    where = " and ".join(cond)
+    return frappe.db.sql(
+        "select pe.name, pe.payment_date, pr.supplier, pr.custom_project_name project, "
+        "pe.purchase_receipt, pe.amount "
+        "from `tabProcureflow Payment Entry` pe "
+        "join `tabPurchase Receipt` pr on pr.name = pe.purchase_receipt "
+        "where " + where + " order by pe.payment_date desc, pe.creation desc limit 5000",
+        vals, as_dict=True)
+
+
+def _rb_supplier_spend(f):
+    filters = _D.get_dashboard_filters(project=f["project"], from_date=f["from_date"], to_date=f["to_date"])
+    spend = _D.get_grouped_sum("Purchase Order", filters, "supplier", limit=300)
+    counts = {r["label"]: r["value"] for r in _D.get_grouped_count("Purchase Order", filters, "supplier", limit=300)}
+    pf = _D.get_payment_dashboard_filters(project=f["project"], from_date=f["from_date"], to_date=f["to_date"], limit=1000)
+    outm = defaultdict(float)
+    for r in _D.get_payment_dashboard_receipts(pf, limit=10000):
+        outm[r.get("supplier") or "Not Set"] += flt(r.get("outstanding_amount"))
+    total = sum(flt(r["value"]) for r in spend)
+    cum = 0.0
+    rows = []
+    for r in spend:
+        s = r["label"]
+        sp = flt(r["value"])
+        cum += sp
+        rows.append({"supplier": s, "po_count": int(counts.get(s, 0)), "total_spend": sp,
+                     "pct": round(sp / total * 100, 1) if total else 0,
+                     "cumulative_pct": round(cum / total * 100, 1) if total else 0,
+                     "outstanding": flt(outm.get(s, 0))})
+    return rows
+
+
+def _rb_project_spend(f):
+    pp = _D.project_portfolio(from_date=f["from_date"], to_date=f["to_date"])
+    rows = pp["projects"]
+    if f["project"]:
+        rows = [r for r in rows if r["project"] == f["project"]]
+    return rows
+
+
+def _rb_item_history(f):
+    filters = _D.get_dashboard_filters(project=f["project"], from_date=f["from_date"], to_date=f["to_date"])
+    cond, vals = _D._po_conditions(filters, "po")
+    if f["supplier"]:
+        cond += " and po.supplier = %(sup)s"
+        vals["sup"] = f["supplier"]
+    if f["search"]:
+        cond += " and (poi.item_code like %(it)s or poi.item_name like %(it)s)"
+        vals["it"] = "%" + f["search"] + "%"
+    return frappe.db.sql(
+        "select poi.item_code, poi.item_name, poi.parent po_no, po.transaction_date, "
+        "po.supplier, po.custom_project_name project, poi.qty, poi.uom, poi.rate, "
+        "poi.custom_gst_percent gst_percent, poi.custom_rate_with_tax rate_with_tax, poi.amount "
+        "from `tabPurchase Order Item` poi join `tabPurchase Order` po on po.name = poi.parent "
+        "where " + cond + " order by po.transaction_date desc, poi.parent limit 5000",
+        vals, as_dict=True)
+
+
+def _rb_gst_summary(f):
+    filters = _D.get_dashboard_filters(project=f["project"], from_date=f["from_date"], to_date=f["to_date"])
+    cond, vals = _D._po_conditions(filters, "po")
+    if f["supplier"]:
+        cond += " and po.supplier = %(sup)s"
+        vals["sup"] = f["supplier"]
+    base = frappe.db.sql(
+        "select po.supplier, coalesce(po.custom_tax_type,'') tax_type, "
+        "sum(po.total) net, sum(po.grand_total) grand, count(*) n "
+        "from `tabPurchase Order` po where " + cond +
+        " group by po.supplier, po.custom_tax_type", vals, as_dict=True)
+    tax = frappe.db.sql(
+        "select po.supplier, coalesce(po.custom_tax_type,'') tax_type, ptc.account_head, sum(ptc.tax_amount) amt "
+        "from `tabPurchase Order` po join `tabPurchase Taxes and Charges` ptc on ptc.parent = po.name "
+        "where " + cond + " group by po.supplier, po.custom_tax_type, ptc.account_head", vals, as_dict=True)
+    cg, sg, ig = defaultdict(float), defaultdict(float), defaultdict(float)
+    for r in tax:
+        h = (r["account_head"] or "").upper()
+        a = flt(r["amt"])
+        k = (r["supplier"], r["tax_type"])
+        if "IGST" in h:
+            ig[k] += a
+        elif "SGST" in h or "UTGST" in h:
+            sg[k] += a
+        elif "CGST" in h:
+            cg[k] += a
+    rows = []
+    for r in base:
+        k = (r["supplier"], r["tax_type"])
+        rows.append({"supplier": r["supplier"], "tax_type": r["tax_type"] or "—",
+                     "taxable": flt(r["net"]), "cgst": cg.get(k, 0), "sgst": sg.get(k, 0), "igst": ig.get(k, 0),
+                     "total_tax": cg.get(k, 0) + sg.get(k, 0) + ig.get(k, 0),
+                     "grand_total": flt(r["grand"]), "po_count": int(r["n"])})
+    rows.sort(key=lambda r: -r["grand_total"])
+    return rows
+
+
+_REPORTS = {
+    "po-register": (_rb_po_register, [
+        ("name", "PO No.", "text"), ("transaction_date", "Date", "date"), ("supplier", "Supplier", "text"),
+        ("custom_project_name", "Project", "text"), ("custom_test_company_", "Company", "text"),
+        ("custom_category", "Category", "text"), ("total", "Net", "money"),
+        ("total_taxes_and_charges", "Tax", "money"), ("grand_total", "Grand Total", "money"),
+        ("custom_tax_type", "Tax Type", "text"), ("per_received", "% Received", "pct"),
+        ("workflow_state", "Status", "text")]),
+    "mr-register": (_rb_mr_register, [
+        ("name", "MR No.", "text"), ("transaction_date", "Date", "date"), ("schedule_date", "Required By", "date"),
+        ("custom_select_project_", "Project", "text"), ("custom_category", "Category", "text"),
+        ("custom_priority", "Priority", "text"), ("owner", "Requester", "text"),
+        ("per_ordered", "% Ordered", "pct"), ("workflow_state", "Status", "text")]),
+    "grn-register": (_rb_grn_register, [
+        ("purchase_receipt", "Receipt", "text"), ("receipt_date", "Posting Date", "date"),
+        ("supplier", "Supplier", "text"), ("project", "Project", "text"), ("company", "Company", "text"),
+        ("total_amount", "Grand Total", "money"), ("paid_amount", "Paid", "money"),
+        ("outstanding_amount", "Outstanding", "money"), ("payment_status", "Payment", "text")]),
+    "payment-worklist": (_rb_payment_worklist, [
+        ("purchase_receipt", "Receipt", "text"), ("supplier", "Supplier", "text"), ("project", "Project", "text"),
+        ("receipt_date", "Receipt Date", "date"), ("total_amount", "Total", "money"),
+        ("paid_amount", "Paid", "money"), ("outstanding_amount", "Outstanding", "money"),
+        ("progress_percent", "Progress", "pct"), ("payment_status", "Status", "text")]),
+    "payment-register": (_rb_payment_register, [
+        ("name", "Payment No.", "text"), ("payment_date", "Date", "date"), ("supplier", "Supplier", "text"),
+        ("project", "Project", "text"), ("purchase_receipt", "Receipt", "text"), ("amount", "Amount", "money")]),
+    "outstanding-ageing": (_rb_outstanding_ageing, [
+        ("purchase_receipt", "Receipt", "text"), ("supplier", "Supplier", "text"), ("project", "Project", "text"),
+        ("receipt_date", "Posting Date", "date"), ("days_outstanding", "Days", "num"),
+        ("total_amount", "Total", "money"), ("paid_amount", "Paid", "money"),
+        ("outstanding_amount", "Outstanding", "money"), ("bucket", "Ageing", "text")]),
+    "supplier-spend": (_rb_supplier_spend, [
+        ("supplier", "Supplier", "text"), ("po_count", "POs", "num"), ("total_spend", "Spend", "money"),
+        ("pct", "% Spend", "pct"), ("cumulative_pct", "Cumulative %", "pct"), ("outstanding", "Outstanding", "money")]),
+    "project-spend": (_rb_project_spend, [
+        ("project", "Project", "text"), ("committed", "Committed", "money"), ("received", "Received", "money"),
+        ("paid", "Paid", "money"), ("outstanding", "Outstanding", "money"), ("receipts", "Receipts", "num")]),
+    "item-history": (_rb_item_history, [
+        ("item_code", "Item", "text"), ("item_name", "Name", "text"), ("po_no", "PO No.", "text"),
+        ("transaction_date", "Date", "date"), ("supplier", "Supplier", "text"), ("project", "Project", "text"),
+        ("qty", "Qty", "num"), ("uom", "UOM", "text"), ("rate", "Rate", "money"),
+        ("gst_percent", "GST %", "pct"), ("rate_with_tax", "Rate w/ tax", "money"), ("amount", "Amount", "money")]),
+    "gst-summary": (_rb_gst_summary, [
+        ("supplier", "Supplier", "text"), ("tax_type", "Tax Type", "text"), ("taxable", "Taxable", "money"),
+        ("cgst", "CGST", "money"), ("sgst", "SGST", "money"), ("igst", "IGST", "money"),
+        ("total_tax", "Total Tax", "money"), ("grand_total", "Grand Total", "money"), ("po_count", "POs", "num")]),
+}
+
+
+def _rb_item_comparison(f):
+    item = f.get("item")
+    if not item:
+        return []
+    filters = _D.get_dashboard_filters(project=f["project"], from_date=f["from_date"], to_date=f["to_date"])
+    cond, vals = _D._po_conditions(filters, "po")
+    vals["item"] = item
+    extra = " and poi.item_code = %(item)s"
+    if f["supplier"]:
+        extra += " and po.supplier = %(sup)s"
+        vals["sup"] = f["supplier"]
+    raw = frappe.db.sql(
+        "select po.supplier sup, po.transaction_date d, poi.rate rate, poi.uom uom "
+        "from `tabPurchase Order Item` poi join `tabPurchase Order` po on po.name = poi.parent "
+        "where " + cond + extra + " order by po.transaction_date", vals, as_dict=True)
+    bysup = {}
+    for r in raw:
+        bysup.setdefault(r["sup"], []).append(r)
+    rows = []
+    for sup, lst in bysup.items():
+        rates = [flt(x["rate"]) for x in lst]
+        rows.append({"supplier": sup, "uom": lst[-1].get("uom"), "po_count": len(lst),
+                     "first_rate": flt(lst[0]["rate"]), "latest_rate": flt(lst[-1]["rate"]),
+                     "min_rate": min(rates), "max_rate": max(rates),
+                     "avg_rate": round(sum(rates) / len(rates), 2), "last_purchase": str(lst[-1]["d"])})
+    if rows:
+        gmin = min(r["latest_rate"] for r in rows)
+        for r in rows:
+            r["pct_above_min"] = round((r["latest_rate"] - gmin) / gmin * 100, 1) if gmin else 0
+    rows.sort(key=lambda r: r["latest_rate"])
+    return rows
+
+
+def _rb_supplier_statement(f):
+    sup = f.get("supplier")
+    if not sup:
+        return []
+    filters = _D.get_dashboard_filters(project=f["project"], from_date=f["from_date"], to_date=f["to_date"])
+    scope = filters.get("scope") or {}
+    scoped = None if scope.get("see_all", True) else (scope.get("projects") or ["__no_access__"])
+
+    pr_filters = {"supplier": sup, "docstatus": 1}
+    _date_between(pr_filters, "posting_date", f["from_date"], f["to_date"])
+    _scope_project(pr_filters, "custom_project_name", f["project"])
+    prs = frappe.get_all("Purchase Receipt", filters=pr_filters,
+                         fields=["name", "posting_date", "custom_project_name", "rounded_total", "grand_total"],
+                         limit_page_length=0)
+    entries = []
+    for pr in prs:
+        amt = flt(pr.rounded_total) or flt(pr.grand_total)
+        entries.append({"date": str(pr.posting_date), "type": "Receipt", "document": pr.name,
+                        "project": pr.custom_project_name, "debit": amt, "credit": 0})
+
+    cond = ["pe.docstatus = 1", "pr.supplier = %(sup)s"]
+    vals = {"sup": sup}
+    if f["from_date"] and f["to_date"]:
+        cond.append("pe.payment_date between %(fd)s and %(td)s")
+        vals["fd"] = f["from_date"]
+        vals["td"] = f["to_date"]
+    if scoped is not None:
+        cond.append("pr.custom_project_name in %(pjs)s")
+        vals["pjs"] = tuple(scoped)
+    elif f["project"]:
+        cond.append("pr.custom_project_name = %(pj)s")
+        vals["pj"] = f["project"]
+    pays = frappe.db.sql(
+        "select pe.name, pe.payment_date d, pr.custom_project_name proj, pe.amount "
+        "from `tabProcureflow Payment Entry` pe join `tabPurchase Receipt` pr on pr.name = pe.purchase_receipt "
+        "where " + " and ".join(cond) + " order by pe.payment_date", vals, as_dict=True)
+    for p in pays:
+        entries.append({"date": str(p["d"]), "type": "Payment", "document": p["name"],
+                        "project": p["proj"], "debit": 0, "credit": flt(p["amount"])})
+
+    entries.sort(key=lambda e: (e["date"], 0 if e["type"] == "Receipt" else 1))
+    bal = 0.0
+    for e in entries:
+        bal += e["debit"] - e["credit"]
+        e["balance"] = bal
+    return entries
+
+
+_REPORTS["item-comparison"] = (_rb_item_comparison, [
+    ("supplier", "Supplier", "text"), ("uom", "UOM", "text"), ("po_count", "POs", "num"),
+    ("first_rate", "First Rate", "money"), ("latest_rate", "Latest Rate", "money"),
+    ("min_rate", "Min", "money"), ("max_rate", "Max", "money"), ("avg_rate", "Avg", "money"),
+    ("pct_above_min", "% Above Min", "pct"), ("last_purchase", "Last Purchase", "date")])
+
+_REPORTS["supplier-statement"] = (_rb_supplier_statement, [
+    ("date", "Date", "date"), ("type", "Type", "text"), ("document", "Document", "text"),
+    ("project", "Project", "text"), ("debit", "Debit (received)", "money"),
+    ("credit", "Credit (paid)", "money"), ("balance", "Balance", "money")])
+
+
+@frappe.whitelist()
+def report_items():
+    """Item options for report pickers (Item Price Comparison)."""
+    return frappe.get_all("Item", filters={"disabled": 0}, fields=["name", "item_name"],
+                          order_by="item_name", limit_page_length=0)
+
+
+@frappe.whitelist()
+def report_data(report, limit=500, start=0, **kwargs):
+    if report not in _REPORTS:
+        frappe.throw(_("Unknown report: {0}").format(report))
+    builder, cols = _REPORTS[report]
+    rows = builder(_norm(kwargs))
+    total = len(rows)
+    start, limit = int(start), int(limit)
+    return {"rows": rows[start:start + limit], "total": total, "start": start, "limit": limit,
+            "columns": [{"key": k, "label": l, "type": t} for (k, l, t) in cols]}
+
+
+@frappe.whitelist()
+def export_report_xlsx(report, **kwargs):
+    if report not in _REPORTS:
+        frappe.throw(_("Unknown report: {0}").format(report))
+    from frappe.utils.xlsxutils import make_xlsx
+    builder, cols = _REPORTS[report]
+    rows = builder(_norm(kwargs))
+    data = [[l for (k, l, t) in cols]]
+    for r in rows:
+        line = []
+        for (k, l, t) in cols:
+            v = r.get(k)
+            if t in ("money", "num", "pct"):
+                line.append(flt(v) if v is not None else 0)
+            elif t == "date":
+                line.append(str(v) if v else "")
+            else:
+                line.append("" if v is None else str(v))
+        data.append(line)
+    xlsx = make_xlsx(data, report[:30])
+    frappe.response["filename"] = report + ".xlsx"
+    frappe.response["filecontent"] = xlsx.getvalue()
+    frappe.response["type"] = "binary"
+
+
+@frappe.whitelist()
+def export_report_pdf(report, **kwargs):
+    if report not in _REPORTS:
+        frappe.throw(_("Unknown report: {0}").format(report))
+    from frappe.utils.pdf import get_pdf
+    from frappe.utils import fmt_money, escape_html
+    builder, cols = _REPORTS[report]
+    rows = builder(_norm(kwargs))
+    title = report.replace("-", " ").title()
+
+    def fmt(v, t):
+        if v is None or v == "":
+            return ""
+        if t == "money":
+            return fmt_money(flt(v), currency="INR")
+        if t == "pct":
+            return f"{flt(v):g}%"
+        return escape_html(str(v))
+
+    head = "".join(f"<th class='{'r' if t in ('money','num','pct') else ''}'>{escape_html(l)}</th>" for (k, l, t) in cols)
+    body = ""
+    for r in rows:
+        tds = "".join(f"<td class='{'r' if t in ('money','num','pct') else ''}'>{fmt(r.get(k), t)}</td>" for (k, l, t) in cols)
+        body += f"<tr>{tds}</tr>"
+    html = f"""
+    <style>
+      body {{ font-family: Helvetica, Arial, sans-serif; color: #1A2030; }}
+      h2 {{ margin: 0 0 2px; font-size: 16px; }}
+      .meta {{ color: #8A93A3; font-size: 10px; margin-bottom: 10px; }}
+      table {{ width: 100%; border-collapse: collapse; font-size: 9px; }}
+      th, td {{ border: 1px solid #DCDFE6; padding: 4px 6px; text-align: left; }}
+      th {{ background: #F0F1F5; text-transform: uppercase; font-size: 8px; letter-spacing: .03em; }}
+      td.r, th.r {{ text-align: right; }}
+    </style>
+    <h2>{escape_html(title)}</h2>
+    <div class="meta">Sanskruti Group · {len(rows)} rows · generated {nowdate()}</div>
+    <table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>
+    """
+    frappe.response["filename"] = report + ".pdf"
+    frappe.response["filecontent"] = get_pdf(html, {"orientation": "Landscape" if len(cols) > 6 else "Portrait"})
+    frappe.response["type"] = "pdf"
+
+
+# Back-compat thin wrappers (older frontend bundles call these directly).
+@frappe.whitelist()
+def po_register(**kwargs):
+    return report_data("po-register", **kwargs)
+
+
+@frappe.whitelist()
+def payment_worklist(**kwargs):
+    return report_data("payment-worklist", **kwargs)

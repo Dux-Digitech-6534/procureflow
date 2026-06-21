@@ -5,11 +5,13 @@ import { Icon, type IconName } from './Icon';
 import { useTheme } from '../lib/theme';
 
 const NAV: { to: string; label: string; icon: IconName }[] = [
+	{ to: '/dashboard', label: 'Dashboard', icon: 'layers' },
 	{ to: '/material-requests', label: 'Material requests', icon: 'file-text' },
 	{ to: '/purchase-orders', label: 'Purchase orders', icon: 'cube' },
 	{ to: '/receipts', label: 'Receipts', icon: 'package' },
 	{ to: '/approvals', label: 'Approvals', icon: 'shield-check' },
 	{ to: '/payments', label: 'Payments', icon: 'banknote' },
+	{ to: '/reports', label: 'Reports', icon: 'file-text-alt' },
 ];
 
 const BRAND = import.meta.env.BASE_URL + 'brand/';

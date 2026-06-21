@@ -27,6 +27,32 @@ COMPANY_FIELDS = {
     "Purchase Receipt": ("company", "custom_test_company_"),
 }
 
+# Roles that see GROUP-WIDE (all-company, all-project) dashboard figures.
+# Everyone else is scoped to the projects/companies granted via User Permission;
+# a scoped user with no User Permission sees nothing (safe default). Extend this
+# set (e.g. add "Purchase Officer") if a role should see the whole group.
+PRIVILEGED_DASHBOARD_ROLES = {"System Manager", "Administrator"}
+
+
+def get_dashboard_scope():
+    """Per-user visibility scope for dashboards/reports.
+
+    Returns {see_all, projects, companies}. Privileged roles see everything.
+    Others are restricted to their User-Permission projects/companies."""
+    user = frappe.session.user
+    if user == "Administrator" or (set(frappe.get_roles(user)) & PRIVILEGED_DASHBOARD_ROLES):
+        return {"see_all": True, "projects": None, "companies": None}
+    try:
+        projects = [d.for_value for d in frappe.get_all(
+            "User Permission", filters={"user": user, "allow": "Project Master"},
+            fields=["for_value"], limit_page_length=0)]
+        companies = [d.for_value for d in frappe.get_all(
+            "User Permission", filters={"user": user, "allow": ["in", ["Company Master", "Company"]]},
+            fields=["for_value"], limit_page_length=0)]
+    except Exception:
+        projects, companies = [], []
+    return {"see_all": False, "projects": projects, "companies": companies}
+
 
 @frappe.whitelist()
 def get_procurement_dashboard_data(company=None, project=None, month=None, from_date=None, to_date=None):
@@ -37,6 +63,7 @@ def get_procurement_dashboard_data(company=None, project=None, month=None, from_
         "filters": filters,
         "filter_options": get_filter_options(),
         "kpis": get_kpis(filters, outstanding_breakdown),
+        "commitments": get_open_commitments(filters),
         "overview": get_overview(filters),
         "operations": get_operations(filters),
         "payment_tracking": get_payment_tracking(filters),
@@ -95,6 +122,8 @@ def get_dashboard_filters(company=None, project=None, month=None, from_date=None
         "month": month or str(getdate(from_date))[:7],
         "from_date": str(getdate(from_date)),
         "to_date": str(getdate(to_date)),
+        # Server-derived per-user visibility scope; cannot be spoofed by the client.
+        "scope": get_dashboard_scope(),
     }
 
 
@@ -156,10 +185,27 @@ def build_filters(doctype, dashboard_filters, date_field=None, include_date=True
             filters[company_field] = company
 
     project = dashboard_filters.get("project")
-    if project:
-        project_field = first_existing_field(doctype, PROJECT_FIELDS.get(doctype, ("project",)))
+    project_field = first_existing_field(doctype, PROJECT_FIELDS.get(doctype, ("project",)))
+    if project and project_field:
+        filters[project_field] = project
+
+    # Per-user scoping: a non-privileged user only ever sees their permitted
+    # projects/companies, regardless of the requested filter.
+    scope = dashboard_filters.get("scope") or {}
+    if not scope.get("see_all", True):
+        allowed_projects = scope.get("projects") or []
         if project_field:
-            filters[project_field] = project
+            if project and project in allowed_projects:
+                filters[project_field] = project
+            elif allowed_projects:
+                filters[project_field] = ["in", allowed_projects]
+            else:
+                # no project access -> match nothing
+                filters[project_field] = "__no_access__"
+        allowed_companies = scope.get("companies") or []
+        company_field = first_existing_field(doctype, COMPANY_FIELDS.get(doctype, ("company",)))
+        if allowed_companies and company_field and not company:
+            filters[company_field] = ["in", allowed_companies]
 
     return filters
 
@@ -247,7 +293,7 @@ def get_sum(doctype, fieldname, filters):
     if not fieldname or not doctype_exists(doctype):
         return 0
     try:
-        where_clause, values = get_sql_where_clause(doctype, filters)
+        where_clause, values = get_sql_where_clause(doctype, filters, docstatus=1)
         rows = frappe.db.sql(
             f"select coalesce(sum(`{fieldname}`), 0) as value from `tab{doctype}` where {where_clause}",
             values,
@@ -259,12 +305,18 @@ def get_sum(doctype, fieldname, filters):
         return 0
 
 
-def get_sql_where_clause(doctype, filters):
+def get_sql_where_clause(doctype, filters, docstatus="lt2"):
     clauses = []
     values = {}
 
     if has_field(doctype, "docstatus"):
-        clauses.append("`docstatus` < 2")
+        # Money aggregations pass docstatus=1 so unsubmitted DRAFT documents
+        # (e.g. POs the SPA creates as Draft before they are placed) do NOT
+        # inflate spend. Counts/pipeline keep "< 2" so drafts still show.
+        if docstatus == 1:
+            clauses.append("`docstatus` = 1")
+        else:
+            clauses.append("`docstatus` < 2")
 
     for index, (fieldname, value) in enumerate((filters or {}).items()):
         if not has_field(doctype, fieldname):
@@ -303,7 +355,6 @@ def get_kpis(filters, outstanding_breakdown=None):
         "purchase_receipts": pr_counts,
         "total_po_value": {
             "total": total_po_value,
-            "current_month": total_po_value,
         },
         "outstanding_amount": payment_summary,
     }
@@ -553,6 +604,32 @@ def add_months(date_obj, months):
     return getdate(f"{year}-{month:02d}-{day:02d}")
 
 
+def get_open_commitments(filters):
+    """Ordered-not-yet-received exposure: SUM(amount x (100 - per_received)/100)
+    over SUBMITTED POs, excluding Closed/Stopped. Approximation when line rates
+    differ (per_received is a quantity %)."""
+    base = build_filters("Purchase Order", filters)
+    base["docstatus"] = 1
+    amount_field = get_amount_field("Purchase Order")
+    fields = ["name", "status"]
+    if has_field("Purchase Order", "per_received"):
+        fields.append("per_received")
+    if amount_field:
+        fields.append(amount_field)
+    rows = get_list_safe("Purchase Order", filters=base, fields=fields, limit_page_length=20000)
+    total = 0.0
+    count = 0
+    for row in rows:
+        if (row.get("status") or "").strip().lower() in ("closed", "stopped"):
+            continue
+        amount = flt(row.get(amount_field)) if amount_field else 0
+        open_amount = amount * max(0.0, 100 - flt(row.get("per_received"))) / 100.0
+        if open_amount > 0:
+            total += open_amount
+            count += 1
+    return {"value": total, "count": count}
+
+
 def get_recent(doctype, filters, field_map, limit=5):
     fields = ["name", "docstatus"]
     for fieldname in field_map.values():
@@ -670,7 +747,8 @@ def get_analytics(filters):
             "supplier": top_suppliers[0].get("supplier") if top_suppliers else "",
             "total": top_supplier_total,
         },
-        "project_wise": get_grouped_sum("Purchase Order", filters, first_existing_field("Purchase Order", PROJECT_FIELDS["Purchase Order"])),
+        "project_wise": get_grouped_sum("Purchase Order", filters, first_existing_field("Purchase Order", PROJECT_FIELDS["Purchase Order"]), limit=10),
+        "company_wise": get_grouped_sum("Purchase Order", filters, first_existing_field("Purchase Order", ("custom_test_company_", "company")), limit=10),
         "category_wise": get_grouped_sum("Purchase Order", filters, first_existing_field("Purchase Order", ("custom_category", "category"))),
         "priority_wise": get_grouped_count("Material Request", filters, first_existing_field("Material Request", ("custom_priority", "priority"))),
         "supplier_wise": get_grouped_sum("Purchase Order", filters, "supplier" if has_field("Purchase Order", "supplier") else None),
@@ -760,7 +838,7 @@ def get_grouped_sum(doctype, filters, group_field, limit=5):
     if not group_field or not amount_field:
         return []
     try:
-        where_clause, values = get_sql_where_clause(doctype, build_filters(doctype, filters))
+        where_clause, values = get_sql_where_clause(doctype, build_filters(doctype, filters), docstatus=1)
         values["limit"] = int(limit)
         rows = frappe.db.sql(
             f"""
@@ -893,6 +971,7 @@ def get_payment_tracking_dashboard_data(
         "status_summary": get_payment_status_summary(rows),
         "outstanding_by_supplier": get_payment_group_summary(rows, "supplier", limit=10),
         "outstanding_by_project": get_payment_group_summary(rows, "project", limit=10),
+        "ageing": get_ap_ageing_buckets(rows),
         "ledger_rows": view_rows,
         "receipt_overview": view_rows,
         "recent_receipts": view_rows,
@@ -1116,6 +1195,24 @@ def get_payment_dashboard_kpis(rows):
     return totals
 
 
+def get_ap_ageing_buckets(rows):
+    """Outstanding payable bucketed by days since receipt_date (no payment-term
+    master exists, so ageing = days since receipt, not days overdue)."""
+    order = ["0-30", "31-60", "61-90", "90+"]
+    buckets = {k: {"bucket": k, "outstanding": 0.0, "count": 0} for k in order}
+    today = getdate(nowdate())
+    for row in rows:
+        outstanding = flt(row.get("outstanding_amount"))
+        if outstanding <= 0:
+            continue
+        rd = row.get("receipt_date")
+        days = (today - getdate(rd)).days if rd else 0
+        key = "0-30" if days <= 30 else "31-60" if days <= 60 else "61-90" if days <= 90 else "90+"
+        buckets[key]["outstanding"] += outstanding
+        buckets[key]["count"] += 1
+    return [buckets[k] for k in order]
+
+
 def get_payment_status_summary(rows):
     summary = {
         "Paid": {"count": 0, "total_amount": 0, "paid_amount": 0, "outstanding_amount": 0},
@@ -1189,3 +1286,152 @@ def get_payment_dashboard_insights(rows):
         "oldest_pending_receipt": pending_rows[0] if pending_rows else {},
         "completion_percent": 0 if not total else min(round((paid / total) * 100, 1), 100),
     }
+
+
+# ============================================================
+# P2 — Supplier & Project analytics (scope-aware)
+# ============================================================
+
+def _po_conditions(filters, alias="po"):
+    """Build a SQL WHERE fragment (+params) for Purchase Order, honouring the
+    dashboard date/company/project filters and the per-user scope. Submitted only."""
+    conds = [f"`{alias}`.docstatus = 1"]
+    vals = {}
+    fd, td = filters.get("from_date"), filters.get("to_date")
+    if fd and td:
+        conds.append(f"`{alias}`.transaction_date between %(fd)s and %(td)s")
+        vals["fd"], vals["td"] = fd, td
+    company = filters.get("company")
+    if company:
+        conds.append(f"`{alias}`.custom_test_company_ = %(company)s")
+        vals["company"] = company
+    project = filters.get("project")
+    scope = filters.get("scope") or {}
+    scoped = None if scope.get("see_all", True) else (scope.get("projects") or ["__no_access__"])
+    if project and (scoped is None or project in scoped):
+        conds.append(f"`{alias}`.custom_project_name = %(project)s")
+        vals["project"] = project
+    elif project:
+        conds.append("1=0")
+    elif scoped is not None:
+        conds.append(f"`{alias}`.custom_project_name in %(projects)s")
+        vals["projects"] = tuple(scoped)
+    return " and ".join(conds), vals
+
+
+@frappe.whitelist()
+def supplier_analytics(company=None, project=None, from_date=None, to_date=None):
+    filters = get_dashboard_filters(company=company, project=project, from_date=from_date, to_date=to_date)
+
+    spend = get_grouped_sum("Purchase Order", filters, "supplier", limit=50)
+    total_spend = sum(flt(r["value"]) for r in spend)
+    cum = 0.0
+    pareto = []
+    for r in spend:
+        cum += flt(r["value"])
+        pareto.append({"supplier": r["label"], "spend": flt(r["value"]),
+                       "cumulative_pct": round(cum / total_spend * 100, 1) if total_spend else 0})
+
+    pay_filters = get_payment_dashboard_filters(company=company, project=project, from_date=from_date, to_date=to_date, limit=1000)
+    prows = get_payment_dashboard_receipts(pay_filters, limit=10000)
+    out_by_sup = defaultdict(float)
+    for r in prows:
+        out_by_sup[r.get("supplier") or "Not Set"] += flt(r.get("outstanding_amount"))
+
+    cond, vals = _po_conditions(filters, "po")
+    lead = frappe.db.sql(
+        f"""select po.supplier sup, avg(datediff(pr.posting_date, po.transaction_date)) days,
+                   count(distinct pr.name) n
+            from `tabPurchase Receipt` pr
+            join `tabPurchase Receipt Item` pri on pri.parent = pr.name
+            join `tabPurchase Order` po on po.name = pri.purchase_order
+            where pr.docstatus = 1 and pri.purchase_order is not null and pri.purchase_order != ''
+              and {cond}
+            group by po.supplier""", vals, as_dict=True)
+    lead_map = {r.sup: r for r in lead}
+    fill = frappe.db.sql(
+        f"""select po.supplier sup, sum(poi.received_qty) recd, sum(poi.qty) ord
+            from `tabPurchase Order` po join `tabPurchase Order Item` poi on poi.parent = po.name
+            where {cond} group by po.supplier""", vals, as_dict=True)
+    fill_map = {r.sup: r for r in fill}
+
+    scorecard = []
+    for r in spend[:15]:
+        s = r["label"]
+        lm, fm = lead_map.get(s), fill_map.get(s)
+        fillpct = (flt(fm.recd) / flt(fm.ord) * 100) if fm and flt(fm.ord) else None
+        scorecard.append({
+            "supplier": s,
+            "spend": flt(r["value"]),
+            "lead_time": round(flt(lm.days), 1) if lm and lm.days is not None else None,
+            "fill_rate": round(fillpct, 1) if fillpct is not None else None,
+            "outstanding": flt(out_by_sup.get(s, 0)),
+        })
+
+    return {
+        "filters": filters,
+        "active_suppliers": len(spend),
+        "total_spend": total_spend,
+        "top_share": {"supplier": spend[0]["label"] if spend else "",
+                      "pct": round(flt(spend[0]["value"]) / total_spend * 100, 1) if total_spend and spend else 0},
+        "total_outstanding": sum(out_by_sup.values()),
+        "spend": [{"label": r["label"], "value": flt(r["value"])} for r in spend[:12]],
+        "pareto": pareto[:15],
+        "outstanding": sorted([{"label": k, "value": v} for k, v in out_by_sup.items() if v > 0],
+                              key=lambda x: -x["value"])[:12],
+        "scorecard": scorecard,
+    }
+
+
+@frappe.whitelist()
+def project_portfolio(company=None, from_date=None, to_date=None):
+    filters = get_dashboard_filters(company=company, from_date=from_date, to_date=to_date)
+    committed = {r["label"]: flt(r["value"]) for r in get_grouped_sum("Purchase Order", filters, "custom_project_name", limit=100)}
+
+    pay_filters = get_payment_dashboard_filters(company=company, from_date=from_date, to_date=to_date, limit=1000)
+    prows = get_payment_dashboard_receipts(pay_filters, limit=10000)
+    agg = defaultdict(lambda: {"received": 0.0, "paid": 0.0, "outstanding": 0.0, "receipts": 0})
+    for r in prows:
+        d = agg[r.get("project") or "Not Set"]
+        d["received"] += flt(r.get("total_amount"))
+        d["paid"] += flt(r.get("paid_amount"))
+        d["outstanding"] += flt(r.get("outstanding_amount"))
+        d["receipts"] += 1
+
+    rows = []
+    for p in set(committed) | set(agg):
+        d = agg.get(p, {})
+        rows.append({"project": p, "committed": flt(committed.get(p, 0)),
+                     "received": flt(d.get("received")), "paid": flt(d.get("paid")),
+                     "outstanding": flt(d.get("outstanding")), "receipts": d.get("receipts", 0)})
+    rows.sort(key=lambda x: x["committed"], reverse=True)
+
+    return {
+        "filters": filters,
+        "projects": rows,
+        "totals": {
+            "committed": sum(r["committed"] for r in rows),
+            "received": sum(r["received"] for r in rows),
+            "paid": sum(r["paid"] for r in rows),
+            "outstanding": sum(r["outstanding"] for r in rows),
+        },
+    }
+
+
+@frappe.whitelist()
+def item_price_trend(item=None, project=None, from_date=None, to_date=None):
+    """Rate-over-time points for one item (across POs), scope-aware."""
+    if not item:
+        return {"item": item, "points": [], "min": 0, "max": 0, "latest": 0}
+    filters = get_dashboard_filters(project=project, from_date=from_date, to_date=to_date)
+    cond, vals = _po_conditions(filters, "po")
+    vals["item"] = item
+    rows = frappe.db.sql(
+        "select po.transaction_date d, poi.rate rate, po.supplier sup "
+        "from `tabPurchase Order Item` poi join `tabPurchase Order` po on po.name = poi.parent "
+        "where " + cond + " and poi.item_code = %(item)s order by po.transaction_date", vals, as_dict=True)
+    points = [{"date": str(r["d"]), "rate": flt(r["rate"]), "supplier": r["sup"]} for r in rows]
+    rates = [p["rate"] for p in points]
+    return {"item": item, "points": points,
+            "min": min(rates) if rates else 0, "max": max(rates) if rates else 0,
+            "latest": points[-1]["rate"] if points else 0, "count": len(points)}

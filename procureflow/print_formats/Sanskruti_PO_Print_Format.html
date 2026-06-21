@@ -1,0 +1,991 @@
+<style>
+/* =========================================================
+   PROFESSIONAL PURCHASE ORDER PRINT FORMAT
+   ERPNext / Frappe Compatible | A4 Print Optimized
+   ========================================================= */
+
+@page {
+    size: A4;
+    margin: 8mm 10mm 8mm 10mm;
+}
+
+html,
+body,
+.print-format {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #111111;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 10px;
+    line-height: 1.35;
+}
+
+.print-format {
+    width: 100%;
+}
+
+.print-format * {
+    box-sizing: border-box;
+}
+
+.po-document {
+    width: 100%;
+    color: #111111;
+    border: 1px solid #111111;
+    padding: 10px 12px 14px 12px;
+}
+
+/* =========================================================
+   COMMON
+   ========================================================= */
+
+.po-text-right {
+    text-align: right;
+}
+
+.po-text-center {
+    text-align: center;
+}
+
+.po-nowrap {
+    white-space: nowrap;
+}
+
+.po-wrap {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: normal;
+}
+
+.po-strong {
+    font-weight: 700;
+}
+
+.po-avoid-break {
+    page-break-inside: avoid;
+    break-inside: avoid;
+}
+
+.po-section-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #111111;
+    margin-bottom: 10px;
+}
+
+/* =========================================================
+   HEADER
+   ========================================================= */
+
+.po-header {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 7px;
+}
+
+.po-header td {
+    padding: 0;
+    vertical-align: middle;
+}
+
+.po-logo-cell {
+    width: 86px;
+    text-align: left;
+}
+
+.po-logo {
+    display: block;
+    max-width: 78px;
+    max-height: 58px;
+    object-fit: contain;
+}
+
+.po-company-cell {
+    text-align: center;
+    padding: 0 10px !important;
+}
+
+.po-company-name {
+    font-size: 21px;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    color: #111111;
+}
+
+.po-company-address {
+    margin-top: 5px;
+    font-size: 11px;
+    line-height: 1.3;
+    color: #222222;
+}
+
+.po-company-address p,
+.po-company-address div {
+    display: inline;
+    margin: 0;
+    padding: 0;
+}
+
+.po-header-spacer {
+    width: 86px;
+}
+
+.po-header-line {
+    border-top: 2px solid #111111;
+    margin: 9px 0 12px 0;
+}
+
+.po-document-title {
+    text-align: center;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    margin: 0 0 12px 0;
+}
+
+/* =========================================================
+   ADDRESS BOXES
+   ========================================================= */
+
+.po-address-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+    margin-bottom: 12px;
+}
+
+.po-address-table td {
+    width: 50%;
+    vertical-align: top;
+    padding: 0;
+}
+
+.po-address-left {
+    padding-right: 6px !important;
+}
+
+.po-address-right {
+    padding-left: 6px !important;
+}
+
+.po-address-card {
+    width: 100%;
+    min-height: 210px;
+    height: 210px;
+    border: 1px solid #555555;
+    padding: 11px 12px;
+    overflow: hidden;
+}
+
+.po-party-name {
+    font-size: 11px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: #111111;
+}
+
+.po-address {
+    font-size: 10.5px;
+    line-height: 1.42;
+    color: #111111;
+}
+
+.po-address p,
+.po-address div {
+    margin: 0;
+    padding: 0;
+}
+
+.po-contact {
+    margin-top: 26px;
+    font-size: 10.5px;
+    line-height: 1.55;
+}
+
+.po-contact-row {
+    display: table;
+    width: 100%;
+}
+
+.po-contact-label {
+    display: table-cell;
+    width: 70px;
+    font-weight: 700;
+}
+
+.po-contact-value {
+    display: table-cell;
+}
+
+/* =========================================================
+   PURCHASE ORDER INFORMATION
+   ========================================================= */
+
+.po-info-section {
+    width: 100%;
+    margin-bottom: 12px;
+    page-break-inside: avoid;
+    break-inside: avoid;
+}
+
+.po-info-title {
+    border: 1px solid #555555;
+    border-bottom: 0;
+    padding: 8px 10px;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.po-info-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+.po-info-table td {
+    border: 1px solid #555555;
+    padding: 8px 10px;
+    font-size: 10px;
+    line-height: 1.35;
+    vertical-align: middle;
+}
+
+.po-info-label {
+    width: 24%;
+    font-weight: 700;
+}
+
+.po-info-value {
+    width: 26%;
+}
+
+/* =========================================================
+   ITEM TABLE
+   ========================================================= */
+
+.po-items-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    margin-bottom: 12px;
+}
+
+.po-items-table col.po-col-sl {
+    width: 5%;
+}
+
+.po-items-table col.po-col-code {
+    width: 10%;
+}
+
+.po-items-table col.po-col-desc {
+    width: 22%;
+}
+
+.po-items-table col.po-col-uom {
+    width: 7%;
+}
+
+.po-items-table col.po-col-qty {
+    width: 9%;
+}
+
+.po-items-table col.po-col-rate {
+    width: 10%;
+}
+
+.po-items-table col.po-col-amount {
+    width: 12%;
+}
+
+.po-items-table col.po-col-gst {
+    width: 7%;
+}
+
+.po-items-table col.po-col-gst-amount {
+    width: 10%;
+}
+
+.po-items-table col.po-col-total {
+    width: 13%;
+}
+
+.po-items-table thead {
+    display: table-header-group;
+}
+
+.po-items-table tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+}
+
+.po-items-table th {
+    border: 1px solid #555555;
+    background: #eeeeee;
+    padding: 7px 4px;
+    font-size: 9px;
+    font-weight: 700;
+    color: #111111 !important;
+    text-align: center;
+    vertical-align: middle;
+    line-height: 1.25;
+}
+
+.po-items-table td {
+    border: 1px solid #555555;
+    padding: 7px 6px;
+    font-size: 9.4px;
+    color: #111111;
+    vertical-align: middle;
+    line-height: 1.32;
+}
+
+.po-item-title {
+    font-weight: 700;
+    font-size: 10px;
+    margin-bottom: 3px;
+}
+
+.po-item-description {
+    font-size: 9.2px;
+    color: #111111;
+}
+
+.po-item-description p,
+.po-item-description div {
+    margin: 0;
+    padding: 0;
+}
+
+/* =========================================================
+   AMOUNT WORDS + SUMMARY
+   ========================================================= */
+
+.po-bottom-summary-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+    margin-bottom: 12px;
+}
+
+.po-bottom-summary-table td {
+    vertical-align: top;
+    padding: 0;
+}
+
+.po-words-cell {
+    width: 48%;
+    padding-right: 12px !important;
+}
+
+.po-summary-cell {
+    width: 52%;
+}
+
+.po-amount-words {
+    min-height: 98px;
+    border: 1px solid #555555;
+    padding: 12px;
+    font-size: 10.5px;
+    line-height: 1.45;
+}
+
+.po-amount-words-title {
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+.po-summary-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+.po-summary-table td {
+    border: 1px solid #555555;
+    padding: 8px 10px;
+    font-size: 10.2px;
+    vertical-align: middle;
+}
+
+.po-summary-label {
+    width: 56%;
+    font-weight: 700;
+}
+
+.po-summary-value {
+    width: 44%;
+    text-align: right;
+}
+
+.po-summary-final td {
+    background: #eeeeee;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+/* =========================================================
+   TERMS
+   ========================================================= */
+
+.po-terms-section {
+    width: 100%;
+    border: 1px solid #555555;
+    padding: 10px 12px;
+    margin-bottom: 22px;
+    font-size: 10px;
+    line-height: 1.45;
+    page-break-inside: avoid;
+    break-inside: avoid;
+}
+
+.po-terms-title {
+    font-size: 10.5px;
+    font-weight: 700;
+    margin-bottom: 7px;
+}
+
+.po-terms-content p,
+.po-terms-content div {
+    margin: 0 0 3px 0;
+    padding: 0;
+}
+
+.po-terms-content ul,
+.po-terms-content ol {
+    margin: 3px 0 0 16px;
+    padding: 0;
+}
+
+.po-terms-content li {
+    margin-bottom: 2px;
+}
+
+/* =========================================================
+   SIGNATURE
+   ========================================================= */
+.po-signature-section {
+    width: 100%;
+    margin-top: 2px;
+    text-align: right;
+    page-break-inside: avoid;
+    break-inside: avoid;
+}
+
+.po-signature-space {
+    min-height: 4px;
+    margin-bottom: 1px;
+}
+
+.po-signature-img {
+    display: inline-block;
+    max-height: 90px;
+    max-width: 220px;
+    object-fit: contain;
+}
+
+.po-sign-line {
+    display: inline-block;
+    width: 210px;
+    border-top: 1px solid #111111;
+    padding-top: 2px;
+    font-size: 9px;
+    font-weight: 700;
+    text-align: center;
+}
+/* =========================================================
+   PRINT OPTIMIZATION
+   ========================================================= */
+
+@media print {
+    html,
+    body,
+    .print-format {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    /*
+       One page adjustment:
+       Format/padding/table design same rakha hai.
+       Sirf print ke time whole PO ko slightly scale kiya hai
+       taaki signature second page me na jaye.
+    */
+    .po-document {
+        zoom: 0.88;
+    }
+
+    .po-signature-section {
+        page-break-before: auto !important;
+        page-break-inside: auto !important;
+        break-before: auto !important;
+        break-inside: auto !important;
+    }
+
+    .po-items-table th,
+    .po-summary-final td {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    a {
+        color: #111111 !important;
+        text-decoration: none !important;
+    }
+}
+</style>
+
+{% set company = frappe.get_doc("Company", doc.company) if doc.company else None %}
+{% set company_name = doc.get("custom_test_company_") or (company.company_name if company else doc.company) %}
+{% set currency = doc.currency or (company.default_currency if company else "") %}
+
+{# Per-company addresses from Company Master (keyed by the PO's project company) #}
+{% set co_master = frappe.get_doc("Company Master", doc.get("custom_test_company_")) if (doc.get("custom_test_company_") and frappe.db.exists("Company Master", doc.get("custom_test_company_"))) else None %}
+{% set co_letterhead = (co_master.get("company_address") if co_master else None) %}
+{% set co_shipping = (co_master.get("shipping_address") if co_master else None) %}
+
+{# Per-project site address from Project Master (overrides the company-level shipping) #}
+{% set proj_master = frappe.get_doc("Project Master", doc.get("custom_project_name")) if (doc.get("custom_project_name") and frappe.db.exists("Project Master", doc.get("custom_project_name"))) else None %}
+{% set proj_shipping = (proj_master.get("shipping_address") if proj_master else None) %}
+{% set ship_addr = proj_shipping or co_shipping %}
+{% set company_logo = company.get("company_logo") if company else "" %}
+
+{% set supplier = frappe.get_doc("Supplier", doc.supplier) if doc.get("supplier") else None %}
+
+{% set supplier_gstin = doc.get("gstin") or doc.get("supplier_gstin") or (supplier.get("gstin") if supplier else "") %}
+{% set supplier_pan = (supplier.get("pan") if supplier else "") or (supplier.get("pan_number") if supplier else "") or doc.get("pan") or doc.get("supplier_pan") or doc.get("custom_pan") or doc.get("custom_pan_number") %}
+
+{% set company_address_doc = None %}
+{% if doc.get("company_address") %}
+    {% set company_address_doc = frappe.get_doc("Address", doc.get("company_address")) %}
+{% elif company and company.get("company_address") %}
+    {% set company_address_doc = frappe.get_doc("Address", company.company_address) %}
+{% endif %}
+
+{% set supplier_address_doc = None %}
+{% if doc.get("supplier_address") and not doc.get("address_display") %}
+    {% set supplier_address_doc = frappe.get_doc("Address", doc.supplier_address) %}
+{% endif %}
+
+{% set shipping_address_doc = None %}
+{% if doc.get("shipping_address") and not doc.get("shipping_address_display") %}
+    {% set shipping_address_doc = frappe.get_doc("Address", doc.shipping_address) %}
+{% endif %}
+
+{% macro po_money(value) -%}
+    {{ frappe.utils.fmt_money(value or 0, currency=currency) }}
+{%- endmacro %}
+
+{% macro po_date(value) -%}
+    {{ frappe.utils.formatdate(value, "dd-MM-yyyy") if value else "" }}
+{%- endmacro %}
+
+{% set data = namespace(
+    project_name="",
+    warehouse=doc.get("set_warehouse") or doc.get("warehouse") or doc.get("custom_warehouse") or "",
+    total_item_gst=0
+) %}
+
+{% if doc.get("project") %}
+    {% set data.project_name = frappe.db.get_value("Project", doc.project, "project_name") or doc.project %}
+{% endif %}
+
+{% if doc.get("project_name") or doc.get("custom_project_name") %}
+    {% set data.project_name = doc.get("project_name") or doc.get("custom_project_name") %}
+{% endif %}
+
+{% for item in doc.items %}
+    {% if not data.warehouse and (item.get("warehouse") or item.get("accepted_warehouse")) %}
+        {% set data.warehouse = item.get("warehouse") or item.get("accepted_warehouse") %}
+    {% endif %}
+
+    {% if not data.project_name and item.get("project") %}
+        {% set data.project_name = frappe.db.get_value("Project", item.get("project"), "project_name") or item.get("project") %}
+    {% endif %}
+{% endfor %}
+
+{% set before_tax_total = doc.get("net_total") or doc.get("total") or 0 %}
+{% set total_taxes = doc.get("total_taxes_and_charges") or 0 %}
+{% set grand_total = doc.get("grand_total") or doc.get("rounded_total") or (before_tax_total + total_taxes) %}
+
+{% set terms_data = namespace(content=doc.get("terms") or "") %}
+{% if not terms_data.content and doc.get("tc_name") %}
+    {% set terms_data.content = frappe.db.get_value("Terms and Conditions", doc.get("tc_name"), "terms") or "" %}
+{% endif %}
+{% if not terms_data.content %}
+    {% set terms_data.content = "
+        <ol>
+            <li>Please supply the materials as per the specifications, quality and quantity mentioned above.</li>
+            <li>Delivery must be completed on or before the required by date.</li>
+            <li>All invoices must be raised in the name of the company.</li>
+            <li>Payment will be made as per the agreed payment terms.</li>
+            <li>Goods once supplied will not be taken back.</li>
+        </ol>
+    " %}
+{% endif %}
+
+<div class="po-document">
+
+    <!-- ===================== HEADER ===================== -->
+    <table class="po-header">
+        <tr>
+            <td class="po-logo-cell">
+                {% if company_logo %}
+                    <img src="{{ frappe.utils.get_url(company_logo) }}" class="po-logo">
+                {% endif %}
+            </td>
+
+            <td class="po-company-cell">
+                <div class="po-company-name">
+                    {{ company_name }}
+                </div>
+
+                <div class="po-company-address">
+                    {% if co_letterhead %}
+                        {{ co_letterhead }}
+                    {% elif company_address_doc %}
+                        {% if company_address_doc.address_line1 %}{{ company_address_doc.address_line1 }}{% endif %}
+                        {% if company_address_doc.address_line2 %}, {{ company_address_doc.address_line2 }}{% endif %}
+                        {% if company_address_doc.city %}, {{ company_address_doc.city }}{% endif %}
+                        {% if company_address_doc.state %}, {{ company_address_doc.state }}{% endif %}
+                        {% if company_address_doc.pincode %}, {{ company_address_doc.pincode }}{% endif %}
+                        {% if company_address_doc.country %}, {{ company_address_doc.country }}{% endif %}
+                    {% elif doc.get("company_address_display") %}
+                        {{ doc.get("company_address_display") | replace("<br>", ", ") | replace("<br/>", ", ") | replace("<br />", ", ") | striptags }}
+                    {% elif doc.get("billing_address_display") %}
+                        {{ doc.get("billing_address_display") | replace("<br>", ", ") | replace("<br/>", ", ") | replace("<br />", ", ") | striptags }}
+                    {% endif %}
+                </div>
+            </td>
+
+            <td class="po-header-spacer"></td>
+        </tr>
+    </table>
+
+    <div class="po-header-line"></div>
+
+    <div class="po-document-title">
+        PURCHASE ORDER
+    </div>
+
+    <!-- ===================== SUPPLIER AND SHIPPING ADDRESS ===================== -->
+    <table class="po-address-table po-avoid-break">
+        <tr>
+            <td class="po-address-left">
+                <div class="po-address-card">
+                    <div class="po-section-title">Supplier (Vendor) Address</div>
+
+                    <div class="po-party-name">
+                        {{ doc.get("supplier_name") or doc.get("supplier") }}
+                    </div>
+
+                    <div class="po-address">
+                        {% if doc.get("address_display") %}
+                            {{ doc.get("address_display") | safe }}
+                        {% elif doc.get("supplier_address_display") %}
+                            {{ doc.get("supplier_address_display") | safe }}
+                        {% elif supplier_address_doc %}
+                            {% if supplier_address_doc.address_line1 %}{{ supplier_address_doc.address_line1 }}{% endif %}
+                            {% if supplier_address_doc.address_line2 %}<br>{{ supplier_address_doc.address_line2 }}{% endif %}
+                            {% if supplier_address_doc.city %}<br>{{ supplier_address_doc.city }}{% endif %}
+                            {% if supplier_address_doc.state %}<br>{{ supplier_address_doc.state }}{% endif %}
+                            {% if supplier_address_doc.pincode %}<br>{{ supplier_address_doc.pincode }}{% endif %}
+                            {% if supplier_address_doc.country %}<br>{{ supplier_address_doc.country }}{% endif %}
+                        {% endif %}
+                    </div>
+
+                    <div class="po-contact">
+                        {% if doc.get("contact_mobile") or doc.get("contact_phone") %}
+                            <div class="po-contact-row">
+                                <span class="po-contact-label">Phone:</span>
+                                <span class="po-contact-value">{{ doc.get("contact_mobile") or doc.get("contact_phone") }}</span>
+                            </div>
+                        {% endif %}
+
+                        {% if doc.get("contact_fax") %}
+                            <div class="po-contact-row">
+                                <span class="po-contact-label">Fax:</span>
+                                <span class="po-contact-value">{{ doc.get("contact_fax") }}</span>
+                            </div>
+                        {% endif %}
+
+                        {% if doc.get("contact_email") %}
+                            <div class="po-contact-row">
+                                <span class="po-contact-label">Email:</span>
+                                <span class="po-contact-value">{{ doc.get("contact_email") }}</span>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </td>
+
+            <td class="po-address-right">
+                <div class="po-address-card">
+                    <div class="po-section-title">Shipping Address</div>
+
+                    <div class="po-address">
+                        {% if ship_addr %}
+                            {{ ship_addr | replace(", ", "<br>") | replace(",", "<br>") | safe }}
+                        {% elif doc.get("shipping_address_display") %}
+                            {{ doc.get("shipping_address_display") | safe }}
+                        {% elif shipping_address_doc %}
+                            {% if shipping_address_doc.address_line1 %}{{ shipping_address_doc.address_line1 }}{% endif %}
+                            {% if shipping_address_doc.address_line2 %}<br>{{ shipping_address_doc.address_line2 }}{% endif %}
+                            {% if shipping_address_doc.city %}<br>{{ shipping_address_doc.city }}{% endif %}
+                            {% if shipping_address_doc.state %}<br>{{ shipping_address_doc.state }}{% endif %}
+                            {% if shipping_address_doc.pincode %}<br>{{ shipping_address_doc.pincode }}{% endif %}
+                            {% if shipping_address_doc.country %}<br>{{ shipping_address_doc.country }}{% endif %}
+                        {% elif doc.get("shipping_address") %}
+                            {{ doc.get("shipping_address") | replace("\n", "<br>") | safe }}
+                        {% endif %}
+                    </div>
+
+                    <div class="po-contact">
+                        {% if doc.get("shipping_contact_mobile") %}
+                            <div class="po-contact-row">
+                                <span class="po-contact-label">Phone:</span>
+                                <span class="po-contact-value">{{ doc.get("shipping_contact_mobile") }}</span>
+                            </div>
+                        {% endif %}
+
+                        {% if doc.get("shipping_contact_fax") %}
+                            <div class="po-contact-row">
+                                <span class="po-contact-label">Fax:</span>
+                                <span class="po-contact-value">{{ doc.get("shipping_contact_fax") }}</span>
+                            </div>
+                        {% endif %}
+
+                        {% if doc.get("shipping_contact_email") %}
+                            <div class="po-contact-row">
+                                <span class="po-contact-label">Email:</span>
+                                <span class="po-contact-value">{{ doc.get("shipping_contact_email") }}</span>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <!-- ===================== PURCHASE ORDER INFORMATION ===================== -->
+    <div class="po-info-section">
+        <div class="po-info-title">
+            Purchase Order Information
+        </div>
+
+        <table class="po-info-table">
+            <tr>
+                <td class="po-info-label">Purchase Order No.</td>
+                <td class="po-info-value">{{ doc.name }}</td>
+                <td class="po-info-label">Order Date</td>
+                <td class="po-info-value">{{ po_date(doc.get("transaction_date") or doc.get("posting_date")) }}</td>
+            </tr>
+
+            <tr>
+                <td class="po-info-label">GST Number</td>
+                <td class="po-info-value">{{ supplier_gstin or "" }}</td>
+                <td class="po-info-label">PAN Number</td>
+                <td class="po-info-value">{{ supplier_pan or "" }}</td>
+            </tr>
+
+            <tr>
+                <td class="po-info-label">Site / Project</td>
+                <td class="po-info-value">
+                    {% if data.project_name %}{{ data.project_name }}{% endif %}
+                </td>
+                <td class="po-info-label">Warehouse</td>
+                <td class="po-info-value">
+                    {% if data.warehouse %}{{ data.warehouse }}{% endif %}
+                </td>
+            </tr>
+
+            <tr>
+                <td class="po-info-label">Site Supervisor Name</td>
+                <td class="po-info-value">{{ doc.get("custom_supervisor_name") or "" }}</td>
+                <td class="po-info-label">Site Supervisor Number</td>
+                <td class="po-info-value">{{ doc.get("custom_supervisor_mobile") or "" }}</td>
+            </tr>
+        </table>
+    </div>
+
+    <!-- ===================== ITEM TABLE ===================== -->
+    <table class="po-items-table">
+        <colgroup>
+            <col class="po-col-sl">
+            <col class="po-col-code">
+            <col class="po-col-desc">
+            <col class="po-col-uom">
+            <col class="po-col-qty">
+            <col class="po-col-rate">
+            <col class="po-col-amount">
+            <col class="po-col-gst">
+            <col class="po-col-gst-amount">
+            <col class="po-col-total">
+        </colgroup>
+
+        <thead>
+            <tr>
+                <th>Sr<br>No</th>
+                <th>Item</th>
+                <th>Item Description</th>
+                <th>Unit</th>
+                <th>Quantity</th>
+                <th>Rate<br>({{ currency }})</th>
+                <th>Amount<br>({{ currency }})</th>
+                <th>GST %</th>
+                <th>GST Amount<br>({{ currency }})</th>
+                <th>Total Amount<br>({{ currency }})</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            {% for item in doc.items %}
+
+                {% set item_amount = item.get("amount") or item.get("net_amount") or 0 %}
+                {% set item_rate = item.get("rate") or item.get("net_rate") or 0 %}
+
+                {% set gst_percent_data = namespace(value=0) %}
+                {% set gst_amount_data = namespace(value=0) %}
+
+                {% if item.get("custom_gst_percent") %}
+                    {% set gst_percent_data.value = item.get("custom_gst_percent") %}
+                {% elif item.get("igst_rate") or item.get("cgst_rate") or item.get("sgst_rate") %}
+                    {% set gst_percent_data.value = (item.get("igst_rate") or 0) + (item.get("cgst_rate") or 0) + (item.get("sgst_rate") or 0) %}
+                {% endif %}
+
+                {% if item.get("tax_amount") %}
+                    {% set gst_amount_data.value = item.get("tax_amount") %}
+                {% elif item.get("gst_amount") %}
+                    {% set gst_amount_data.value = item.get("gst_amount") %}
+                {% elif item.get("igst_amount") or item.get("cgst_amount") or item.get("sgst_amount") %}
+                    {% set gst_amount_data.value = (item.get("igst_amount") or 0) + (item.get("cgst_amount") or 0) + (item.get("sgst_amount") or 0) %}
+                {% elif gst_percent_data.value %}
+                    {% set gst_amount_data.value = (item_amount * gst_percent_data.value) / 100 %}
+                {% endif %}
+
+                {% set row_total = item_amount + gst_amount_data.value %}
+                {% set data.total_item_gst = data.total_item_gst + gst_amount_data.value %}
+
+                <tr>
+                    <td class="po-text-center po-nowrap">
+                        {{ loop.index }}
+                    </td>
+
+                    <td class="po-text-center po-wrap">
+                        {{ item.get("item_code") or "" }}
+                    </td>
+
+                    <td class="po-wrap">
+                        <div class="po-item-title">
+                            {{ item.get("item_name") or item.get("item_code") }}
+                        </div>
+
+                        {% if item.get("description") and item.get("description") != item.get("item_name") %}
+                            <div class="po-item-description">
+                                {{ item.get("description") | safe }}
+                            </div>
+                        {% endif %}
+                    </td>
+
+                    <td class="po-text-center po-nowrap">
+                        {{ item.get("uom") or item.get("stock_uom") or "" }}
+                    </td>
+
+                    <td class="po-text-center po-nowrap">
+                        {{ item.get_formatted("qty") if item.get("qty") is not none else "" }}
+                    </td>
+
+                    <td class="po-text-right po-nowrap">
+                        {{ po_money(item_rate) }}
+                    </td>
+
+                    <td class="po-text-right po-nowrap">
+                        {{ po_money(item_amount) }}
+                    </td>
+
+                    <td class="po-text-center po-nowrap">
+                        {{ gst_percent_data.value }}%
+                    </td>
+
+                    <td class="po-text-right po-nowrap">
+                        {{ po_money(gst_amount_data.value) }}
+                    </td>
+
+                    <td class="po-text-right po-nowrap">
+                        {{ po_money(row_total) }}
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- ===================== AMOUNT WORDS AND SUMMARY ===================== -->
+    <table class="po-bottom-summary-table po-avoid-break">
+        <tr>
+            <td class="po-words-cell">
+                <div class="po-amount-words">
+                    <div class="po-amount-words-title">Amount in Words:</div>
+                    {{ doc.get("in_words") or frappe.utils.money_in_words(grand_total, currency) }}
+                </div>
+            </td>
+
+            <td class="po-summary-cell">
+                <table class="po-summary-table">
+                    <tr>
+                        <td class="po-summary-label">Total Amount (Before Tax)</td>
+                        <td class="po-summary-value">{{ po_money(before_tax_total) }}</td>
+                    </tr>
+
+                    {% if doc.get("taxes") and doc.taxes|length %}{% for t in doc.taxes %}{% if t.tax_amount %}<tr>
+                        <td class="po-summary-label">{{ t.description or t.account_head }}</td>
+                        <td class="po-summary-value">{{ po_money(t.tax_amount) }}</td>
+                    </tr>{% endif %}{% endfor %}{% else %}<tr>
+                        <td class="po-summary-label">Total GST Amount</td>
+                        <td class="po-summary-value">{{ po_money(total_taxes if total_taxes else data.total_item_gst) }}</td>
+                    </tr>{% endif %}
+
+                    <tr class="po-summary-final">
+                        <td class="po-summary-label">Grand Total ({{ currency }})</td>
+                        <td class="po-summary-value">{{ po_money(grand_total) }}</td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+    <!-- ===================== TERMS AND CONDITIONS ===================== -->
+    <div class="po-terms-section">
+        <div class="po-terms-title">
+            Terms &amp; Conditions:
+        </div>
+
+        <div class="po-terms-content">
+            {{ terms_data.content | safe }}
+        </div>
+    </div>
+
+    <!-- ===================== SIGNATURE ===================== -->
+    {% set company_signature = doc.get("custom_company_signature") %}
+    {% set company_signature_src = frappe.utils.get_url(company_signature) if company_signature and company_signature.startswith("/") else company_signature %}
+    <div class="po-signature-section">
+        {% if company_signature_src %}
+        <div class="po-signature-space">
+            <img src="{{ company_signature_src }}" class="po-signature-img" />
+        </div>
+        {% else %}
+        <div class="po-signature-space"></div>
+        {% endif %}
+        <div class="po-sign-line">
+            Authorized Signature
+        </div>
+    </div>
+
+</div>

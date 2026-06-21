@@ -28,7 +28,132 @@ export const API = {
 	paymentDetail: 'procureflow.react_api.payment_detail',
 	docLinks: 'procureflow.react_api.doc_links',
 	settingsCanCreate: 'procureflow.react_api.settings_can_create',
+	dashboardData: 'procureflow.dashboard_api.get_procurement_dashboard_data',
+	paymentDashboard: 'procureflow.dashboard_api.get_payment_tracking_dashboard_data',
+	poRegister: 'procureflow.react_api.po_register',
+	paymentWorklist: 'procureflow.react_api.payment_worklist',
+	reportData: 'procureflow.react_api.report_data',
+	exportReportXlsx: 'procureflow.react_api.export_report_xlsx',
+	exportReportPdf: 'procureflow.react_api.export_report_pdf',
+	reportItems: 'procureflow.react_api.report_items',
+	itemPriceTrend: 'procureflow.dashboard_api.item_price_trend',
+	supplierAnalytics: 'procureflow.dashboard_api.supplier_analytics',
+	projectPortfolio: 'procureflow.dashboard_api.project_portfolio',
 } as const;
+
+export interface SupplierAnalytics {
+	active_suppliers: number;
+	total_spend: number;
+	top_share: { supplier: string; pct: number };
+	total_outstanding: number;
+	spend: NameValue[];
+	pareto: { supplier: string; spend: number; cumulative_pct: number }[];
+	outstanding: NameValue[];
+	scorecard: { supplier: string; spend: number; lead_time: number | null; fill_rate: number | null; outstanding: number }[];
+}
+export interface ProjectPortfolio {
+	projects: { project: string; committed: number; received: number; paid: number; outstanding: number; receipts: number }[];
+	totals: { committed: number; received: number; paid: number; outstanding: number };
+}
+
+export interface ReportResult {
+	rows: Record<string, unknown>[];
+	total: number;
+	start: number;
+	limit: number;
+}
+
+// ---- Dashboard payload types (subset actually rendered) ----
+export interface NameValue {
+	label: string;
+	value: number;
+	total?: number;
+}
+export interface StatusCounts {
+	total: number;
+	approved?: number;
+	pending?: number;
+	rejected?: number;
+	completed?: number;
+	partial?: number;
+}
+export interface DashboardData {
+	filters: {
+		company: string;
+		project: string;
+		from_date: string;
+		to_date: string;
+		scope?: { see_all: boolean; projects: string[] | null; companies: string[] | null };
+	};
+	filter_options: { companies: string[]; projects: string[] };
+	kpis: {
+		material_requests: StatusCounts;
+		purchase_orders: StatusCounts;
+		purchase_receipts: StatusCounts;
+		total_po_value: { total: number };
+		outstanding_amount: { total: number; overdue: number; pending: number; partial: number };
+	};
+	commitments: { value: number; count: number };
+	overview: {
+		monthly_po_value: { label: string; month: string; value: number; percent: number; is_current: boolean }[];
+		mom_growth: number;
+		avg_monthly: number;
+		period_total: number;
+	};
+	operations: {
+		material_requests: { name: string; status: string; project?: string; priority?: string }[];
+		purchase_orders: { name: string; status: string; supplier?: string; value?: number }[];
+		purchase_receipts: { name: string; status: string; supplier?: string; project?: string }[];
+		top_suppliers: { supplier: string; total: number; percent: number }[];
+	};
+	outstanding_breakdown: {
+		total_outstanding: number;
+		over_30_days_outstanding: number;
+		pending_outstanding: number;
+		partial_outstanding: number;
+		top_supplier: string;
+		top_project: string;
+	};
+	analytics: {
+		mr_to_po_conversion: { value: number; converted: number; material_requests: number };
+		total_period_spend: { value: number };
+		top_supplier_share: { value: number; supplier: string; total: number };
+		project_wise: NameValue[];
+		company_wise: NameValue[];
+		category_wise: NameValue[];
+		supplier_wise: NameValue[];
+		priority_wise: NameValue[];
+	};
+}
+export interface PaymentDashboard {
+	kpis: {
+		total_receipt_amount: number;
+		total_paid_amount: number;
+		total_outstanding_amount: number;
+		paid_percent: number;
+		overdue_receipts: number;
+		pending_receipts: number;
+		partial_receipts: number;
+		paid_receipts: number;
+		avg_payment_days: number;
+		receipt_count: number;
+	};
+	status_summary: Record<string, { count: number; total_amount: number; paid_amount: number; outstanding_amount: number }>;
+	outstanding_by_supplier: { label: string; receipt_count: number; total_amount: number; paid_amount: number; outstanding_amount: number }[];
+	outstanding_by_project: { label: string; receipt_count: number; total_amount: number; paid_amount: number; outstanding_amount: number }[];
+	ageing: { bucket: string; outstanding: number; count: number }[];
+	ledger_rows: {
+		purchase_receipt: string;
+		supplier: string;
+		project: string;
+		total_amount: number;
+		paid_amount: number;
+		outstanding_amount: number;
+		payment_status: string;
+		receipt_date: string;
+		progress_percent: number;
+	}[];
+}
 
 export interface ProjectOption {
 	name: string;
