@@ -100,6 +100,39 @@ def _loads(payload):
     return payload or {}
 
 
+def _item_uoms_map(item_names, stock_uoms=None):
+    """{item: [{uom, conversion_factor}]} for the multi-UOM line picker. Always
+    includes the stock UOM (factor 1) first. Uses get_all, which bypasses the
+    UOM Conversion Detail docperm so every SPA role gets the list."""
+    item_names = [n for n in (item_names or []) if n]
+    out = {}
+    if item_names:
+        for r in frappe.get_all(
+            "UOM Conversion Detail",
+            filters={"parent": ["in", item_names]},
+            fields=["parent", "uom", "conversion_factor"],
+            order_by="idx asc",
+            limit_page_length=0,
+        ):
+            out.setdefault(r.parent, []).append({"uom": r.uom, "conversion_factor": flt(r.conversion_factor) or 1})
+    # guarantee at least the stock UOM
+    for name in item_names:
+        su = (stock_uoms or {}).get(name) or frappe.db.get_value("Item", name, "stock_uom")
+        rows = out.get(name) or []
+        if su and not any(u["uom"] == su for u in rows):
+            rows.insert(0, {"uom": su, "conversion_factor": 1})
+        out[name] = rows
+    return out
+
+
+def _conversion_factor(item_code, uom, stock_uom):
+    """Resolve a line's UOM conversion factor (stock-qty = qty * factor)."""
+    if not uom or uom == stock_uom:
+        return 1
+    cf = frappe.db.get_value("UOM Conversion Detail", {"parent": item_code, "uom": uom}, "conversion_factor")
+    return flt(cf) or 1
+
+
 # ---------------------------------------------------------------------------
 # Context for the Material Request form (dropdowns)
 # ---------------------------------------------------------------------------
@@ -145,11 +178,13 @@ def item_search(category, query="", limit=50):
         order_by="item_name asc",
         limit_page_length=int(limit),
     )
+    umap = _item_uoms_map([it.name for it in items], {it.name: it.stock_uom for it in items})
     return [
         {
             "value": it.name,
             "label": it.item_name or it.name,
             "uom": it.stock_uom,
+            "uoms": umap.get(it.name) or [{"uom": it.stock_uom, "conversion_factor": 1}],
             "sub_category": it.custom_sub_category,
         }
         for it in items
@@ -221,7 +256,7 @@ def save_material_request(data):
                 "qty": flt(row.get("qty")) or 0,
                 "uom": uom,
                 "stock_uom": item.stock_uom,
-                "conversion_factor": 1,
+                "conversion_factor": _conversion_factor(item.name, uom, item.stock_uom),
                 "schedule_date": row.get("schedule_date") or doc.schedule_date,
                 "warehouse": set_warehouse,
                 "custom_specification": row.get("specification"),
@@ -308,6 +343,7 @@ def mr_detail(name):
         and frappe.has_permission("Purchase Order", "create")
     )
     items = []
+    umap = _item_uoms_map([it.item_code for it in doc.items])
     for it in doc.items:
         sub = frappe.db.get_value("Item", it.item_code, "custom_sub_category")
         items.append(
@@ -316,6 +352,7 @@ def mr_detail(name):
                 "item_name": it.item_name,
                 "qty": it.qty,
                 "uom": it.uom,
+                "uoms": umap.get(it.item_code) or [{"uom": it.uom, "conversion_factor": 1}],
                 "schedule_date": it.schedule_date,
                 "specification": it.get("custom_specification"),
                 "remark": it.get("custom_remark"),
@@ -407,12 +444,14 @@ def mr_items_for_po(material_request):
     doc = frappe.get_doc("Material Request", material_request)
     doc.check_permission("read")
     out = []
+    umap = _item_uoms_map([it.item_code for it in doc.items])
     for it in doc.items:
         out.append(
             {
                 "item_code": it.item_code,
                 "item_name": it.item_name,
                 "uom": it.uom,
+                "uoms": umap.get(it.item_code) or [{"uom": it.uom, "conversion_factor": 1}],
                 "qty": flt(it.qty) - flt(it.ordered_qty),
                 "specification": it.get("custom_specification"),
                 "remark": it.get("custom_remark"),
@@ -478,7 +517,7 @@ def save_purchase_order(data):
                 "qty": flt(row.get("qty")) or 0,
                 "uom": row.get("uom") or item.stock_uom,
                 "stock_uom": item.stock_uom,
-                "conversion_factor": 1,
+                "conversion_factor": _conversion_factor(item.name, row.get("uom") or item.stock_uom, item.stock_uom),
                 "rate": flt(row.get("rate")),
                 "custom_gst_percent": flt(row.get("gst_percent")),
                 "custom_rate_with_tax": flt(row.get("rate_with_tax")),
@@ -552,6 +591,7 @@ def po_detail(name):
     doc = frappe.get_doc("Purchase Order", name)
     doc.check_permission("read")
     items = []
+    umap = _item_uoms_map([it.item_code for it in doc.items])
     for it in doc.items:
         items.append(
             {
@@ -559,6 +599,7 @@ def po_detail(name):
                 "item_name": it.item_name,
                 "qty": it.qty,
                 "uom": it.uom,
+                "uoms": umap.get(it.item_code) or [{"uom": it.uom, "conversion_factor": 1}],
                 "rate": it.rate,
                 "gst_percent": it.get("custom_gst_percent"),
                 "rate_with_tax": it.get("custom_rate_with_tax"),

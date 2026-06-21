@@ -27,6 +27,7 @@ interface Line {
 	item_code: string;
 	item_name: string;
 	uom: string;
+	uoms: { uom: string; conversion_factor: number }[];
 	sub_category: string | null;
 	qty: string;
 	rate: string;
@@ -112,6 +113,7 @@ export function NewPurchaseOrder() {
 					item_code: it.item_code,
 					item_name: it.item_name,
 					uom: it.uom,
+					uoms: it.uoms ?? [{ uom: it.uom, conversion_factor: 1 }],
 					sub_category: it.sub_category,
 					qty: String(it.qty ?? ''),
 					rate: String(it.rate ?? ''),
@@ -163,12 +165,13 @@ export function NewPurchaseOrder() {
 		if (v === NONE) setLines((ls) => ls.map((l) => ({ ...l, gst: '', rwt: l.rate })));
 	}
 
-	async function appendItems(rows: { item_code: string; item_name: string; uom: string; sub_category: string | null; qty?: number; specification?: string | null; remark?: string | null; material_request?: string | null; material_request_item?: string | null }[]) {
+	async function appendItems(rows: { item_code: string; item_name: string; uom: string; uoms?: { uom: string; conversion_factor: number }[]; sub_category: string | null; qty?: number; specification?: string | null; remark?: string | null; material_request?: string | null; material_request_item?: string | null }[]) {
 		const fresh = rows.filter((r) => !lines.some((l) => l.item_code === r.item_code));
 		const built: Line[] = fresh.map((r) => ({
 			item_code: r.item_code,
 			item_name: r.item_name,
 			uom: r.uom,
+			uoms: r.uoms ?? [{ uom: r.uom, conversion_factor: 1 }],
 			sub_category: r.sub_category,
 			qty: r.qty != null ? String(r.qty) : '',
 			rate: '',
@@ -203,7 +206,7 @@ export function NewPurchaseOrder() {
 	function addByCategory(code: string) {
 		const opt = (itemsRes.data?.message ?? []).find((o) => o.value === code);
 		if (!opt) return;
-		void appendItems([{ item_code: opt.value, item_name: opt.label, uom: opt.uom, sub_category: opt.sub_category }]);
+		void appendItems([{ item_code: opt.value, item_name: opt.label, uom: opt.uom, uoms: opt.uoms, sub_category: opt.sub_category }]);
 	}
 
 	async function pullFromMr(mrName: string) {
@@ -533,7 +536,11 @@ export function NewPurchaseOrder() {
 									</div>
 								</div>
 								<input className="inp mono" value={l.qty} disabled={readOnly} inputMode="decimal" onChange={(e) => setLineCalc(i, 'qty', e.target.value)} />
-								<input className="inp" value={l.uom} disabled />
+								{l.uoms.length > 1 ? (
+									<SelectInput value={l.uom} onChange={(v) => setLine(i, { uom: v })} disabled={readOnly} options={l.uoms.map((u) => ({ value: u.uom }))} />
+								) : (
+									<input className="inp" value={l.uom} disabled />
+								)}
 								<input className="inp mono" value={l.rate} disabled={readOnly} inputMode="decimal" placeholder="0.00" onChange={(e) => setLineCalc(i, 'rate', e.target.value)} />
 								<input className="inp mono" value={isNoGst ? '' : l.gst} disabled={readOnly || isNoGst} inputMode="decimal" placeholder="0" onChange={(e) => setLineCalc(i, 'gst', e.target.value)} />
 								<input className="inp mono" value={isNoGst ? l.rate : l.rwt} disabled={readOnly || isNoGst} inputMode="decimal" placeholder="0.00" onChange={(e) => setLineCalc(i, 'rwt', e.target.value)} />

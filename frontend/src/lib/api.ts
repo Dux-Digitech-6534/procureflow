@@ -43,10 +43,16 @@ export interface MrContext {
 	today: string;
 }
 
+export interface UomOption {
+	uom: string;
+	conversion_factor: number;
+}
+
 export interface ItemOption {
 	value: string;
 	label: string;
 	uom: string;
+	uoms: UomOption[];
 	sub_category: string | null;
 }
 
@@ -70,6 +76,7 @@ export interface MrLine {
 	item_name: string;
 	qty: number | string;
 	uom: string;
+	uoms: UomOption[];
 	schedule_date: string | null;
 	specification: string | null;
 	remark: string | null;
@@ -199,6 +206,7 @@ export interface PoSourceLine {
 	item_code: string;
 	item_name: string;
 	uom: string;
+	uoms: UomOption[];
 	qty: number;
 	specification: string | null;
 	remark: string | null;
@@ -229,6 +237,7 @@ export interface PoLine {
 	item_name: string;
 	qty: number;
 	uom: string;
+	uoms: UomOption[];
 	rate: number;
 	gst_percent: number | null;
 	rate_with_tax: number | null;

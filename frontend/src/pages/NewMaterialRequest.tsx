@@ -24,6 +24,7 @@ interface LineRow {
 	item_code: string;
 	item_name: string;
 	uom: string;
+	uoms: { uom: string; conversion_factor: number }[];
 	sub_category: string | null;
 	qty: string;
 	specification: string;
@@ -84,6 +85,7 @@ export function NewMaterialRequest() {
 					item_code: it.item_code,
 					item_name: it.item_name,
 					uom: it.uom,
+					uoms: it.uoms ?? [{ uom: it.uom, conversion_factor: 1 }],
 					sub_category: it.sub_category,
 					qty: String(it.qty ?? ''),
 					specification: it.specification ?? '',
@@ -129,6 +131,7 @@ export function NewMaterialRequest() {
 				item_code: opt.value,
 				item_name: opt.label,
 				uom: opt.uom,
+				uoms: opt.uoms ?? [{ uom: opt.uom, conversion_factor: 1 }],
 				sub_category: opt.sub_category,
 				qty: '',
 				specification: '',
@@ -453,7 +456,11 @@ export function NewMaterialRequest() {
 										inputMode="decimal"
 										onChange={(e) => setLine(i, { qty: e.target.value })}
 									/>
-									<input className="inp" value={l.uom} disabled />
+									{l.uoms.length > 1 ? (
+										<SelectInput value={l.uom} onChange={(v) => setLine(i, { uom: v })} disabled={readOnly} options={l.uoms.map((u) => ({ value: u.uom }))} />
+									) : (
+										<input className="inp" value={l.uom} disabled />
+									)}
 									<input
 										className="inp mono"
 										type="date"
