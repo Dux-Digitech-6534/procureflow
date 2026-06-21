@@ -2,6 +2,7 @@ import { type ReactNode } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { FrappeProvider, useFrappeAuth } from 'frappe-react-sdk';
 import { ThemeProvider } from './lib/theme';
+import { ToastProvider } from './components/Toast';
 import { AppShell } from './components/AppShell';
 import { MaterialRequests } from './pages/MaterialRequests';
 import { NewMaterialRequest } from './pages/NewMaterialRequest';
@@ -31,6 +32,7 @@ export default function App() {
 	return (
 		<FrappeProvider enableSocket={false}>
 			<ThemeProvider>
+				<ToastProvider>
 				<AuthGate>
 					<BrowserRouter basename="/procureflow">
 						<Routes>
@@ -54,6 +56,7 @@ export default function App() {
 						</Routes>
 					</BrowserRouter>
 				</AuthGate>
+				</ToastProvider>
 			</ThemeProvider>
 		</FrappeProvider>
 	);

@@ -6,6 +6,7 @@ import { parseServerError } from '../lib/format';
 import { Icon } from './Icon';
 import { Modal } from './ui';
 import { ActionButtons } from './ActionButtons';
+import { useToast } from './Toast';
 
 /**
  * Top-of-detail-page workflow + lifecycle actions, all driven by the LIVE,
@@ -41,6 +42,7 @@ export function DocLifecycleActions({
 	const navigate = useNavigate();
 	const { call: cancelDoc, loading: cancelling } = useFrappePostCall<{ message: { name: string } }>(API.cancelDoc);
 	const { call: amendDoc, loading: amending } = useFrappePostCall<{ message: { name: string } }>(API.amendDoc);
+	const toast = useToast();
 	const [confirmCancel, setConfirmCancel] = useState(false);
 	const [err, setErr] = useState('');
 
@@ -48,6 +50,7 @@ export function DocLifecycleActions({
 		setErr('');
 		try {
 			await cancelDoc({ doctype, name });
+			toast.success(`${noun.charAt(0).toUpperCase() + noun.slice(1)} cancelled`);
 			setConfirmCancel(false);
 			onChanged();
 		} catch (e) {
@@ -59,6 +62,7 @@ export function DocLifecycleActions({
 		setErr('');
 		try {
 			const r = await amendDoc({ doctype, name });
+			toast.success('Amended — editing the new draft');
 			navigate(basePath + '/' + r.message.name);
 		} catch (e) {
 			setErr(parseServerError(e));

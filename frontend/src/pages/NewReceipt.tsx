@@ -4,6 +4,7 @@ import { useFrappeGetCall, useFrappePostCall, useFrappeFileUpload } from 'frappe
 import { API, type PoReceiptItems, type ReceivablePo } from '../lib/api';
 import { Field, SearchSelect, TextArea } from '../components/form';
 import { Icon } from '../components/Icon';
+import { useToast } from '../components/Toast';
 import { fmtMoney, parseServerError } from '../lib/format';
 
 /** Image picker tile (DUX .upload), used for the receipt material / invoice
@@ -63,6 +64,7 @@ function todayStr(): string {
 
 export function NewReceipt() {
 	const navigate = useNavigate();
+	const toast = useToast();
 	const [searchParams] = useSearchParams();
 	const posRes = useFrappeGetCall<{ message: ReceivablePo[] }>(API.receivablePos, {});
 	const pos = posRes.data?.message ?? [];
@@ -147,6 +149,7 @@ export function NewReceipt() {
 					items,
 				},
 			});
+			toast.success('Receipt created');
 			navigate('/receipts');
 			void res;
 		} catch (e) {

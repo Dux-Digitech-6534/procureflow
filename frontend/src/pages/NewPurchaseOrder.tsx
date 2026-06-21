@@ -15,6 +15,7 @@ import { Field, SelectInput, SearchSelect, TextArea } from '../components/form';
 import { Icon } from '../components/Icon';
 import { DocLifecycleActions } from '../components/DocLifecycleActions';
 import { LinkedDocs } from '../components/LinkedDocs';
+import { useToast } from '../components/Toast';
 import { fmtMoney, parseServerError } from '../lib/format';
 
 const AMOUNT_THRESHOLD = 50000;
@@ -49,6 +50,7 @@ const round = (n: number, d = 2) => {
 export function NewPurchaseOrder() {
 	const { id } = useParams();
 	const navigate = useNavigate();
+	const toast = useToast();
 	const isEdit = !!id;
 
 	const ctx = useFrappeGetCall<{ message: PoContext }>(API.poContext, {}).data?.message;
@@ -304,6 +306,7 @@ export function NewPurchaseOrder() {
 				})),
 			};
 			const res = await savePo({ data: payload });
+			toast.success(strict ? (overThreshold ? 'Sent for approval' : 'Purchase order placed') : 'Draft saved');
 			// When editing an existing PO we stay on the same URL, so React Router
 			// won't refetch — revalidate the detail so the new workflow state (e.g.
 			// Draft -> Approved after "Place order") and its buttons update without a
@@ -336,6 +339,7 @@ export function NewPurchaseOrder() {
 		setErr('');
 		try {
 			await changeStatus({ name: detail.name, action });
+			toast.success(action === 'close' ? 'Order closed' : 'Order re-opened');
 			await detailRes.mutate();
 		} catch (e) {
 			setErr(parseServerError(e));

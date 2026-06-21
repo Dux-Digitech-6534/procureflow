@@ -18,6 +18,7 @@ import { Field, SelectInput, SearchSelect, TextArea } from '../components/form';
 import { Icon } from '../components/Icon';
 import { DocLifecycleActions } from '../components/DocLifecycleActions';
 import { LinkedDocs } from '../components/LinkedDocs';
+import { useToast } from '../components/Toast';
 import { parseServerError } from '../lib/format';
 
 interface LineRow {
@@ -35,6 +36,7 @@ interface LineRow {
 export function NewMaterialRequest() {
 	const { id } = useParams();
 	const navigate = useNavigate();
+	const toast = useToast();
 	const isEdit = !!id;
 
 	const ctxRes = useFrappeGetCall<{ message: MrContext }>(API.mrContext, {});
@@ -199,6 +201,7 @@ export function NewMaterialRequest() {
 			};
 			const res = await saveMr({ data: payload });
 			const newName = res.message.name;
+			toast.success(strict ? 'Material request submitted for approval' : 'Draft saved');
 			if (pendingFile && !id) {
 				try {
 					await uploadTo(newName, pendingFile);

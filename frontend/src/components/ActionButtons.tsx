@@ -3,6 +3,7 @@ import { useFrappePostCall } from 'frappe-react-sdk';
 import { API, actionTone } from '../lib/api';
 import { Modal } from './ui';
 import { TextArea } from './form';
+import { useToast } from './Toast';
 import { parseServerError } from '../lib/format';
 
 const SM = { padding: '5px 12px', fontSize: 12.5 };
@@ -19,6 +20,7 @@ export function ActionButtons({
 	onDone: () => void;
 }) {
 	const { call: apply, loading } = useFrappePostCall(API.applyAction);
+	const toast = useToast();
 	const [rejecting, setRejecting] = useState<string | null>(null);
 	const [reason, setReason] = useState('');
 	const [busy, setBusy] = useState<string | null>(null);
@@ -29,6 +31,7 @@ export function ActionButtons({
 		setErr('');
 		try {
 			await apply({ doctype, name, action, remark });
+			toast.success(`${action} — done`);
 			setRejecting(null);
 			setReason('');
 			onDone();

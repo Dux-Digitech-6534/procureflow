@@ -4,6 +4,7 @@ import { API } from '../lib/api';
 import { fmtMoney, parseServerError } from '../lib/format';
 import { Modal } from './ui';
 import { Field } from './form';
+import { useToast } from './Toast';
 
 /** A receipt we can record a payment against (subset shared by PrListRow / PrDetail). */
 export interface PayableReceipt {
@@ -17,6 +18,7 @@ export interface PayableReceipt {
  *  Payments page and the Receipt detail page. */
 export function RecordPaymentModal({ pr, onClose, onSaved }: { pr: PayableReceipt; onClose: () => void; onSaved: () => void }) {
 	const { call: save, loading } = useFrappePostCall<{ message: { name: string } }>(API.savePayment);
+	const toast = useToast();
 	const [amount, setAmount] = useState(String(pr.outstanding));
 	const [date, setDate] = useState('');
 	const [remark, setRemark] = useState('');
@@ -29,6 +31,7 @@ export function RecordPaymentModal({ pr, onClose, onSaved }: { pr: PayableReceip
 		if (amt > pr.outstanding + 0.001) return setErr('Amount cannot exceed the outstanding amount.');
 		try {
 			await save({ data: { purchase_receipt: pr.name, amount: amt, payment_date: date || null, remark } });
+			toast.success('Payment recorded');
 			onSaved();
 		} catch (e) {
 			setErr(parseServerError(e));
