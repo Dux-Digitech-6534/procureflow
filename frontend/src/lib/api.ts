@@ -16,6 +16,7 @@ export const API = {
 	applyAction: 'procureflow.react_api.apply_action',
 	cancelDoc: 'procureflow.react_api.cancel_doc',
 	amendDoc: 'procureflow.react_api.amend_doc',
+	setPoStatus: 'procureflow.react_api.set_po_status',
 	pendingApprovals: 'procureflow.react_api.pending_approvals',
 	receivablePos: 'procureflow.react_api.receivable_pos',
 	poReceiptItems: 'procureflow.react_api.po_receipt_items',
@@ -274,6 +275,9 @@ export interface PoDetail extends DocActionState {
 	grand_total: number;
 	rounding_adjustment: number | null;
 	rounded_total: number | null;
+	material_requests: string[];
+	can_close: boolean;
+	can_reopen: boolean;
 	taxes: PoTaxRow[];
 	items: PoLine[];
 	print_format: string | null;

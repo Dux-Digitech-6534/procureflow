@@ -616,6 +616,8 @@ def po_detail(name):
         for t in doc.get("taxes", [])
         if flt(t.tax_amount)
     ]
+    material_requests = sorted({it.get("material_request") for it in doc.items if it.get("material_request")})
+    can_change_status = bool(doc.docstatus == 1 and frappe.has_permission("Purchase Order", "submit", doc))
     return {
         "name": doc.name,
         "supplier": doc.supplier,
@@ -636,6 +638,9 @@ def po_detail(name):
         "grand_total": doc.grand_total,
         "rounding_adjustment": doc.get("rounding_adjustment"),
         "rounded_total": doc.get("rounded_total"),
+        "material_requests": material_requests,
+        "can_close": bool(can_change_status and doc.status != "Closed"),
+        "can_reopen": bool(can_change_status and doc.status == "Closed"),
         "taxes": taxes,
         "items": items,
         "print_format": PO_PRINT_FORMAT,
@@ -700,6 +705,22 @@ def amend_doc(doctype, name):
         amended.workflow_state = init
     amended.insert()
     return {"name": amended.name, "workflow_state": amended.get("workflow_state"), "docstatus": amended.docstatus}
+
+
+@frappe.whitelist()
+def set_po_status(name, action):
+    """Manually Close / Re-open a submitted Purchase Order (ERPNext update_status,
+    which re-derives downstream state safely). Respects submit permission."""
+    doc = frappe.get_doc("Purchase Order", name)
+    if not frappe.has_permission("Purchase Order", "submit", doc):
+        raise frappe.PermissionError(_("You are not permitted to change this order's status."))
+    if action == "close":
+        doc.update_status("Closed")
+    elif action == "reopen":
+        doc.update_status("Draft")
+    else:
+        frappe.throw(_("Unsupported status action."))
+    return {"name": doc.name, "status": doc.status, "docstatus": doc.docstatus}
 
 
 @frappe.whitelist()

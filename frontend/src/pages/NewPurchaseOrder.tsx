@@ -71,6 +71,7 @@ export function NewPurchaseOrder() {
 	const { call: fetchMrItems } = useFrappePostCall<{ message: { category: string; project: string; items: PoSourceLine[] } }>(API.mrItemsForPo);
 	const { call: fetchGst } = useFrappePostCall<{ message: number }>(API.itemGstRate);
 	const { call: detectTax } = useFrappePostCall<{ message: string }>(API.partyTaxType);
+	const { call: changeStatus, loading: statusBusy } = useFrappePostCall<{ message: { status: string } }>(API.setPoStatus);
 
 	const [supplier, setSupplier] = useState('');
 	const [project, setProject] = useState('');
@@ -256,6 +257,13 @@ export function NewPurchaseOrder() {
 	const roundOff = round(roundedGrand - grand, 2);
 	const overThreshold = grand > AMOUNT_THRESHOLD;
 	const hasGst = gstTotal > 0;
+	// Source material request(s): derived from the lines (covers new / from-MR /
+	// editing). When present, the project & category are fixed by the MR.
+	const sourceMrs = useMemo(() => {
+		const fromLines = Array.from(new Set(lines.map((l) => l.material_request).filter(Boolean))) as string[];
+		return fromLines.length ? fromLines : detail?.material_requests ?? [];
+	}, [lines, detail]);
+	const fromMr = sourceMrs.length > 0;
 	const breakdown = isNoGst
 		? []
 		: taxType === INTER
@@ -323,6 +331,17 @@ export function NewPurchaseOrder() {
 		window.open(url, '_blank', 'noopener');
 	}
 
+	async function doStatus(action: 'close' | 'reopen') {
+		if (!detail) return;
+		setErr('');
+		try {
+			await changeStatus({ name: detail.name, action });
+			await detailRes.mutate();
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
 	return (
 		<main>
 			<div className="crumb">
@@ -343,11 +362,45 @@ export function NewPurchaseOrder() {
 							<span className={'tag ' + poDisplayStatus(detail).tone}>{poDisplayStatus(detail).label}</span>
 						</div>
 					)}
+					{sourceMrs.length > 0 && (
+						<div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+							<span className="eyebrow" style={{ margin: 0 }}>From material request</span>
+							{sourceMrs.map((mr) => (
+								<span
+									key={mr}
+									className="id"
+									style={{ cursor: 'pointer', textDecoration: 'underline' }}
+									onClick={() => navigate('/material-requests/' + mr)}
+								>
+									{mr}
+								</span>
+							))}
+						</div>
+					)}
 				</div>
 				<div className="spacer" />
 				{isEdit && detail && (
 					<button className="btn" onClick={printPo} title="Open the purchase order print format in a new tab">
 						<Icon name="file-text" size={15} /> Print
+					</button>
+				)}
+				{isEdit && detail && detail.docstatus === 1 && detail.status !== 'Closed' && (detail.per_received ?? 0) < 100 && (
+					<button
+						className="btn"
+						onClick={() => navigate('/receipts/new?po=' + encodeURIComponent(detail.name))}
+						title="Create a goods receipt for this order"
+					>
+						<Icon name="package" size={15} /> Create receipt
+					</button>
+				)}
+				{isEdit && detail?.can_close && (
+					<button className="btn" disabled={statusBusy} onClick={() => void doStatus('close')}>
+						<Icon name="lock" size={14} /> {statusBusy ? 'Closing…' : 'Close'}
+					</button>
+				)}
+				{isEdit && detail?.can_reopen && (
+					<button className="btn" disabled={statusBusy} onClick={() => void doStatus('reopen')}>
+						<Icon name="unlock" size={14} /> {statusBusy ? 'Reopening…' : 'Re-open'}
 					</button>
 				)}
 				{editable && (
@@ -425,11 +478,11 @@ export function NewPurchaseOrder() {
 								options={(ctx?.suppliers ?? []).map((s) => ({ value: s.name, label: s.supplier_name || s.name }))}
 							/>
 						</Field>
-						<Field label="Project" hint="Company, store & warehouse fill from the project.">
+						<Field label="Project" hint={fromMr ? 'Set by the material request.' : 'Company, store & warehouse fill from the project.'}>
 							<SearchSelect
 								value={project}
 								onChange={setProject}
-								disabled={readOnly}
+								disabled={readOnly || fromMr}
 								placeholder="Select project…"
 								options={(ctx?.projects ?? []).map((p) => ({
 									value: p.name,
@@ -448,7 +501,7 @@ export function NewPurchaseOrder() {
 									setCategory(v);
 									setLines([]);
 								}}
-								disabled={readOnly}
+								disabled={readOnly || fromMr}
 								allowEmpty
 								placeholder="Select category…"
 								options={(ctx?.categories ?? []).map((c) => ({ value: c }))}

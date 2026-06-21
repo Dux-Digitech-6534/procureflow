@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useFrappeGetCall, useFrappePostCall, useFrappeFileUpload } from 'frappe-react-sdk';
 import { API, type PoReceiptItems, type ReceivablePo } from '../lib/api';
 import { Field, SearchSelect, TextArea } from '../components/form';
@@ -63,6 +63,7 @@ function todayStr(): string {
 
 export function NewReceipt() {
 	const navigate = useNavigate();
+	const [searchParams] = useSearchParams();
 	const posRes = useFrappeGetCall<{ message: ReceivablePo[] }>(API.receivablePos, {});
 	const pos = posRes.data?.message ?? [];
 	const [po, setPo] = useState('');
@@ -81,6 +82,13 @@ export function NewReceipt() {
 	);
 	const { call: createReceipt, loading: saving } = useFrappePostCall<{ message: { name: string } }>(API.createReceipt);
 	const { upload, loading: uploading } = useFrappeFileUpload();
+
+	// Deep-link from a PO ("Create receipt" button): /receipts/new?po=<name>.
+	const poParam = searchParams.get('po');
+	useEffect(() => {
+		if (poParam && !po) setPo(poParam);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [poParam]);
 
 	useEffect(() => {
 		const msg = itemsRes.data?.message;

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useFrappeGetCall } from 'frappe-react-sdk';
 import { API, payTone, type PrDetail } from '../lib/api';
@@ -5,16 +6,18 @@ import { fmtDateLong, fmtMoney, fmtNum } from '../lib/format';
 import { Icon } from '../components/Icon';
 import { Facts } from '../components/ui';
 import { LinkedDocs } from '../components/LinkedDocs';
+import { RecordPaymentModal } from '../components/RecordPaymentModal';
 
 export function ReceiptDetail() {
 	const { id } = useParams();
 	const navigate = useNavigate();
-	const { data, isLoading, error } = useFrappeGetCall<{ message: PrDetail }>(
+	const { data, isLoading, error, mutate } = useFrappeGetCall<{ message: PrDetail }>(
 		API.prDetail,
 		{ name: id },
 		id ? undefined : null,
 	);
 	const d = data?.message;
+	const [paying, setPaying] = useState(false);
 
 	return (
 		<main>
@@ -34,7 +37,23 @@ export function ReceiptDetail() {
 						</div>
 					)}
 				</div>
+				{d && d.outstanding > 0.001 && (
+					<>
+						<div className="spacer" />
+						<button className="btn primary" onClick={() => setPaying(true)}>
+							<Icon name="banknote" size={15} /> Record payment
+						</button>
+					</>
+				)}
 			</div>
+
+			{d && paying && (
+				<RecordPaymentModal
+					pr={{ name: d.name, supplier: d.supplier, supplier_name: d.supplier_name, outstanding: d.outstanding }}
+					onClose={() => setPaying(false)}
+					onSaved={() => { setPaying(false); void mutate(); }}
+				/>
+			)}
 
 			{isLoading && <div className="card"><div className="empty"><div className="t2">Loading…</div></div></div>}
 			{error && <div className="card"><div className="empty"><div className="t2" style={{ color: 'var(--err)' }}>Could not load receipt.</div></div></div>}
