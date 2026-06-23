@@ -31,6 +31,7 @@ export const API = {
 	renameMaster: 'procureflow.react_api.rename_master',
 	updateMaster: 'procureflow.react_api.update_master',
 	userInfo: 'procureflow.react_api.user_info',
+	capabilities: 'procureflow.react_api.capabilities',
 	notifications: 'procureflow.react_api.notifications',
 	markNotificationsRead: 'procureflow.react_api.mark_notifications_read',
 	stockBalances: 'procureflow.react_api.stock_balances',
@@ -622,6 +623,16 @@ export interface UserInfo {
 	user_image: string | null;
 	company: string | null;
 	roles: string[];
+}
+
+/** Per-user capability flags that gate which mobile screens/actions are shown. */
+export interface Capabilities {
+	create_mr: boolean;
+	receive: boolean;
+	read_po: boolean;
+	read_pr: boolean;
+	read_stock: boolean;
+	approve: boolean;
 }
 
 export interface NotificationItem {

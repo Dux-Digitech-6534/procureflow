@@ -302,7 +302,9 @@ def save_material_request(data):
 
 @frappe.whitelist()
 def mr_list(search="", limit=100):
-    rows = frappe.get_all(
+    if not frappe.has_permission("Material Request", "read"):
+        return []
+    rows = frappe.get_list(
         "Material Request",
         filters={"material_request_type": MR_TYPE},
         fields=[
@@ -594,7 +596,9 @@ def save_purchase_order(data):
 
 @frappe.whitelist()
 def po_list(limit=100):
-    rows = frappe.get_all(
+    if not frappe.has_permission("Purchase Order", "read"):
+        return []
+    rows = frappe.get_list(
         "Purchase Order",
         fields=[
             "name",
@@ -918,7 +922,9 @@ def _attach_file_to_doc(file_url, doctype, name, fieldname):
 
 @frappe.whitelist()
 def pr_list(limit=100):
-    rows = frappe.get_all(
+    if not frappe.has_permission("Purchase Receipt", "read"):
+        return []
+    rows = frappe.get_list(
         "Purchase Receipt",
         filters={"docstatus": 1},
         fields=[
@@ -1206,6 +1212,42 @@ def user_info():
     }
 
 
+# --- Mobile screen-access policy: which ROLES unlock which screens ------------
+# Explicit, app-level mapping (intentionally narrower than the broad Frappe read
+# perms that Supervisor/Purchase User happen to grant). Edit these sets to retune
+# who sees what on the mobile app. ADMIN roles unlock everything. The backend
+# data endpoints remain Frappe-permission-gated regardless (security floor).
+_CAP_ADMIN_ROLES = {"Administrator", "System Manager", "Purchase Manager"}
+_CAP_CREATE_MR_ROLES = {"Material Request Creator", "Purchase User", "Supervisor", "Purchase Officer"}
+_CAP_RECEIVE_ROLES = {"Supervisor", "Purchase User", "Purchase Officer"}
+_CAP_APPROVE_ROLES = {"Material Request Approval", "PO Approver"}
+_CAP_PO_BROWSE_ROLES = {"Purchase Officer", "PO Approver"}
+_CAP_PR_BROWSE_ROLES = {"Purchase Officer", "PO Approver", "Supervisor"}
+_CAP_STOCK_ROLES = {"Stock User", "Stock Manager"}
+
+
+@frappe.whitelist()
+def capabilities():
+    """Per-user capability flags that drive which mobile screens/actions are shown,
+    based on an EXPLICIT role→screen map (above). Admin roles unlock everything.
+    UI gating only; the backend stays the source of truth (lists are
+    permission-scoped, detail/save are permission-checked)."""
+    roles = set(frappe.get_roles())
+    is_admin = bool(roles & _CAP_ADMIN_ROLES)
+
+    def has(role_set):
+        return is_admin or bool(roles & role_set)
+
+    return {
+        "create_mr": has(_CAP_CREATE_MR_ROLES),
+        "receive": has(_CAP_RECEIVE_ROLES),
+        "read_po": has(_CAP_PO_BROWSE_ROLES),
+        "read_pr": has(_CAP_PR_BROWSE_ROLES),
+        "read_stock": has(_CAP_STOCK_ROLES),
+        "approve": has(_CAP_APPROVE_ROLES),
+    }
+
+
 @frappe.whitelist()
 def notifications(limit=20):
     """The current user's latest Frappe Notification Log entries + unread count."""
@@ -1235,7 +1277,9 @@ def stock_balances(search="", limit=500):
     """On-hand stock from Bin (item / warehouse / actual_qty) for the Stock screen.
     Only non-zero balances; item names attached; client-style search across
     item code, item name and warehouse over the fetched window."""
-    rows = frappe.get_all(
+    if not frappe.has_permission("Bin", "read"):
+        return []
+    rows = frappe.get_list(
         "Bin",
         filters={"actual_qty": ["!=", 0]},
         fields=["item_code", "warehouse", "actual_qty", "stock_uom"],

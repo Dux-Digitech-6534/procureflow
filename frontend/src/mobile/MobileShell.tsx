@@ -2,12 +2,14 @@ import { useEffect, useRef, useState, type ReactNode, type TouchEvent as RTouchE
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Icon, type IconName } from '../components/Icon';
 import { LangProvider, useLang } from './i18n';
+import { CapsProvider, useCaps } from './caps';
+import type { Capabilities } from '../lib/api';
 
-const TABS: { to: string; labelKey: string; icon: IconName }[] = [
+const TABS: { to: string; labelKey: string; icon: IconName; cap?: keyof Capabilities }[] = [
 	{ to: '/m', labelKey: 'nav.home', icon: 'layers' },
-	{ to: '/m/requests', labelKey: 'nav.requests', icon: 'file-text' },
-	{ to: '/m/approvals', labelKey: 'nav.approvals', icon: 'shield-check' },
-	{ to: '/m/receipts', labelKey: 'nav.receipts', icon: 'package' },
+	{ to: '/m/requests', labelKey: 'nav.requests', icon: 'file-text', cap: 'create_mr' },
+	{ to: '/m/approvals', labelKey: 'nav.approvals', icon: 'shield-check', cap: 'approve' },
+	{ to: '/m/receipts', labelKey: 'nav.receipts', icon: 'package', cap: 'receive' },
 ];
 const TAB_ROOTS = TABS.map((t) => t.to);
 
@@ -37,7 +39,9 @@ export function MHeader({ title, backTo, right, onBack }: { title: ReactNode; ba
 export function MobileShell() {
 	return (
 		<LangProvider>
-			<ShellInner />
+			<CapsProvider>
+				<ShellInner />
+			</CapsProvider>
 		</LangProvider>
 	);
 }
@@ -45,14 +49,16 @@ export function MobileShell() {
 function ShellInner() {
 	const { pathname } = useLocation();
 	const { t } = useLang();
+	const caps = useCaps();
 	const showTabs = TAB_ROOTS.includes(pathname);
+	const visibleTabs = TABS.filter((tab) => !tab.cap || caps[tab.cap]);
 
 	return (
 		<div className="mscope">
 			<Outlet />
 			{showTabs && (
 				<nav className="tabs">
-					{TABS.map((tab) => (
+					{visibleTabs.map((tab) => (
 						<NavLink key={tab.to} to={tab.to} end={tab.to === '/m'} className={({ isActive }) => (isActive ? 'on' : '')}>
 							<Icon name={tab.icon} size={20} />
 							<span className="tl">{t(tab.labelKey)}</span>

@@ -4,6 +4,7 @@ import { API, type PendingApprovals, type MrListRow, type ReceivablePo, type Not
 import { Icon } from '../components/Icon';
 import { MHeader } from './MobileShell';
 import { useLang } from './i18n';
+import { useCaps } from './caps';
 
 const COMPANY_LOGO = '/assets/procureflow/img/sanskruti-group-asia-logo.png';
 
@@ -16,6 +17,7 @@ function firstName(user: string | null | undefined): string {
 export function MHome() {
 	const nav = useNavigate();
 	const { t } = useLang();
+	const caps = useCaps();
 	const { currentUser } = useFrappeAuth();
 
 	const apprRes = useFrappeGetCall<{ message: PendingApprovals }>(API.pendingApprovals, {});
@@ -60,85 +62,105 @@ export function MHome() {
 				</div>
 
 				<div className="kgrid">
-					<button className={'kpi' + (awaitingMe ? ' warn' : '')} onClick={() => nav('/m/approvals')}>
-						<span className="kic">
-							<Icon name="shield-check" size={19} />
-						</span>
-						<span className="kv">{awaitingMe}</span>
-						<span className="kl">{t('home.awaitingApproval')}</span>
-					</button>
-					<button className="kpi" onClick={() => nav('/m/requests')}>
-						<span className="kic">
-							<Icon name="file-text" size={19} />
-						</span>
-						<span className="kv">{myOpen}</span>
-						<span className="kl">{t('home.myOpenRequests')}</span>
-					</button>
-					<button className="kpi" onClick={() => nav('/m/receipts')}>
-						<span className="kic">
-							<Icon name="package" size={19} />
-						</span>
-						<span className="kv">{toReceive}</span>
-						<span className="kl">{t('home.deliveriesToReceive')}</span>
-					</button>
-					<button className="kpi" onClick={() => nav('/m/requests/new')}>
-						<span className="kic">
-							<Icon name="plus" size={19} />
-						</span>
-						<span className="kv" style={{ fontSize: 17, fontWeight: 650, fontFamily: 'var(--font-ui)' }}>
-							{t('home.new')}
-						</span>
-						<span className="kl">{t('home.raiseMr')}</span>
-					</button>
+					{caps.approve && (
+						<button className={'kpi' + (awaitingMe ? ' warn' : '')} onClick={() => nav('/m/approvals')}>
+							<span className="kic">
+								<Icon name="shield-check" size={19} />
+							</span>
+							<span className="kv">{awaitingMe}</span>
+							<span className="kl">{t('home.awaitingApproval')}</span>
+						</button>
+					)}
+					{caps.create_mr && (
+						<button className="kpi" onClick={() => nav('/m/requests')}>
+							<span className="kic">
+								<Icon name="file-text" size={19} />
+							</span>
+							<span className="kv">{myOpen}</span>
+							<span className="kl">{t('home.myOpenRequests')}</span>
+						</button>
+					)}
+					{caps.receive && (
+						<button className="kpi" onClick={() => nav('/m/receipts')}>
+							<span className="kic">
+								<Icon name="package" size={19} />
+							</span>
+							<span className="kv">{toReceive}</span>
+							<span className="kl">{t('home.deliveriesToReceive')}</span>
+						</button>
+					)}
+					{caps.create_mr && (
+						<button className="kpi" onClick={() => nav('/m/requests/new')}>
+							<span className="kic">
+								<Icon name="plus" size={19} />
+							</span>
+							<span className="kv" style={{ fontSize: 17, fontWeight: 650, fontFamily: 'var(--font-ui)' }}>
+								{t('home.new')}
+							</span>
+							<span className="kl">{t('home.raiseMr')}</span>
+						</button>
+					)}
 				</div>
 
-				<div style={{ marginTop: 18 }}>
-					<button className="mbtn" onClick={() => nav('/m/requests/new')}>
-						<Icon name="plus" size={18} /> {t('home.newMr')}
-					</button>
-				</div>
+				{caps.create_mr && (
+					<div style={{ marginTop: 18 }}>
+						<button className="mbtn" onClick={() => nav('/m/requests/new')}>
+							<Icon name="plus" size={18} /> {t('home.newMr')}
+						</button>
+					</div>
+				)}
 
-				<div className="eyebrow2" style={{ marginTop: 22 }}>
-					{t('home.browse')}
-				</div>
-				<div className="lcard">
-					<button className="lrow" onClick={() => nav('/m/orders')}>
-						<span className="glyph">
-							<Icon name="box" size={18} />
-						</span>
-						<span className="tx">
-							<span className="l1">{t('home.purchaseOrders')}</span>
-							<span className="l2">{t('home.poSub')}</span>
-						</span>
-						<span className="rt">
-							<Icon name="chevron" size={16} style={{ transform: 'rotate(180deg)', color: 'var(--fg-4)' }} />
-						</span>
-					</button>
-					<button className="lrow" onClick={() => nav('/m/receipt-history')}>
-						<span className="glyph">
-							<Icon name="package" size={18} />
-						</span>
-						<span className="tx">
-							<span className="l1">{t('home.receiptHistory')}</span>
-							<span className="l2">{t('home.receiptHistorySub')}</span>
-						</span>
-						<span className="rt">
-							<Icon name="chevron" size={16} style={{ transform: 'rotate(180deg)', color: 'var(--fg-4)' }} />
-						</span>
-					</button>
-					<button className="lrow" onClick={() => nav('/m/stock')}>
-						<span className="glyph">
-							<Icon name="cube" size={18} />
-						</span>
-						<span className="tx">
-							<span className="l1">{t('home.stockOnHand')}</span>
-							<span className="l2">{t('home.stockSub')}</span>
-						</span>
-						<span className="rt">
-							<Icon name="chevron" size={16} style={{ transform: 'rotate(180deg)', color: 'var(--fg-4)' }} />
-						</span>
-					</button>
-				</div>
+				{(caps.read_po || caps.read_pr || caps.read_stock) && (
+					<>
+						<div className="eyebrow2" style={{ marginTop: 22 }}>
+							{t('home.browse')}
+						</div>
+						<div className="lcard">
+							{caps.read_po && (
+								<button className="lrow" onClick={() => nav('/m/orders')}>
+									<span className="glyph">
+										<Icon name="box" size={18} />
+									</span>
+									<span className="tx">
+										<span className="l1">{t('home.purchaseOrders')}</span>
+										<span className="l2">{t('home.poSub')}</span>
+									</span>
+									<span className="rt">
+										<Icon name="chevron" size={16} style={{ transform: 'rotate(180deg)', color: 'var(--fg-4)' }} />
+									</span>
+								</button>
+							)}
+							{caps.read_pr && (
+								<button className="lrow" onClick={() => nav('/m/receipt-history')}>
+									<span className="glyph">
+										<Icon name="package" size={18} />
+									</span>
+									<span className="tx">
+										<span className="l1">{t('home.receiptHistory')}</span>
+										<span className="l2">{t('home.receiptHistorySub')}</span>
+									</span>
+									<span className="rt">
+										<Icon name="chevron" size={16} style={{ transform: 'rotate(180deg)', color: 'var(--fg-4)' }} />
+									</span>
+								</button>
+							)}
+							{caps.read_stock && (
+								<button className="lrow" onClick={() => nav('/m/stock')}>
+									<span className="glyph">
+										<Icon name="cube" size={18} />
+									</span>
+									<span className="tx">
+										<span className="l1">{t('home.stockOnHand')}</span>
+										<span className="l2">{t('home.stockSub')}</span>
+									</span>
+									<span className="rt">
+										<Icon name="chevron" size={16} style={{ transform: 'rotate(180deg)', color: 'var(--fg-4)' }} />
+									</span>
+								</button>
+							)}
+						</div>
+					</>
+				)}
 			</div>
 		</>
 	);
