@@ -614,7 +614,11 @@ body,
 
 {% set before_tax_total = doc.get("net_total") or doc.get("total") or 0 %}
 {% set total_taxes = doc.get("total_taxes_and_charges") or 0 %}
-{% set grand_total = doc.get("grand_total") or doc.get("rounded_total") or (before_tax_total + total_taxes) %}
+{% set raw_grand = doc.get("grand_total") or (before_tax_total + total_taxes) %}
+{# Show the ROUNDED grand total (what is actually payable) as both the figure and
+   the amount-in-words, and surface the round-off as its own summary line. #}
+{% set grand_total = doc.get("rounded_total") or raw_grand %}
+{% set round_off = doc.get("rounding_adjustment") or (grand_total - raw_grand) %}
 
 {% set terms_data = namespace(content=doc.get("terms") or "") %}
 {% if not terms_data.content and doc.get("tc_name") %}
@@ -688,10 +692,12 @@ body,
                     </div>
 
                     <div class="po-address">
+                        {# Strip any trailing Phone/Email the address template appends —
+                           the structured .po-contact block below shows them once. #}
                         {% if doc.get("address_display") %}
-                            {{ doc.get("address_display") | safe }}
+                            {{ doc.get("address_display").split("Phone:")[0].split("Email:")[0] | safe }}
                         {% elif doc.get("supplier_address_display") %}
-                            {{ doc.get("supplier_address_display") | safe }}
+                            {{ doc.get("supplier_address_display").split("Phone:")[0].split("Email:")[0] | safe }}
                         {% elif supplier_address_doc %}
                             {% if supplier_address_doc.address_line1 %}{{ supplier_address_doc.address_line1 }}{% endif %}
                             {% if supplier_address_doc.address_line2 %}<br>{{ supplier_address_doc.address_line2 }}{% endif %}
@@ -933,7 +939,7 @@ body,
             <td class="po-words-cell">
                 <div class="po-amount-words">
                     <div class="po-amount-words-title">Amount in Words:</div>
-                    {{ doc.get("in_words") or frappe.utils.money_in_words(grand_total, currency) }}
+                    {{ frappe.utils.money_in_words(grand_total, currency) }}
                 </div>
             </td>
 
@@ -950,6 +956,11 @@ body,
                     </tr>{% endif %}{% endfor %}{% else %}<tr>
                         <td class="po-summary-label">Total GST Amount</td>
                         <td class="po-summary-value">{{ po_money(total_taxes if total_taxes else data.total_item_gst) }}</td>
+                    </tr>{% endif %}
+
+                    {% if round_off and (round_off|abs) > 0.004 %}<tr>
+                        <td class="po-summary-label">Round Off</td>
+                        <td class="po-summary-value">{{ po_money(round_off) }}</td>
                     </tr>{% endif %}
 
                     <tr class="po-summary-final">

@@ -1,0 +1,375 @@
+/* ============================================================
+   ProcureFlow MOBILE APP (/m) — a lean, native-feeling field UI for
+   site supervisors. Built on the DUX tokens but a fresh, touch-first
+   layout. Everything is scoped under .mscope so it never affects the
+   desktop app or the Phase-A responsive web view. This is also the
+   surface that Capacitor will later wrap into the Android app.
+   ============================================================ */
+
+.mscope {
+	position: relative;
+	z-index: 1;
+	display: flex;
+	flex-direction: column;
+	min-height: 100dvh;
+	background: var(--canvas);
+	-webkit-text-size-adjust: 100%;
+}
+.mscope * { box-sizing: border-box; }
+
+/* ---------- Top app bar ---------- */
+.mscope .top {
+	position: sticky; top: 0; z-index: 40;
+	display: flex; align-items: center; gap: 8px;
+	min-height: 54px; padding: 0 8px 0 6px;
+	padding-top: env(safe-area-inset-top);
+	background: var(--hdr-bg);
+	border-bottom: 1px solid var(--hairline);
+	backdrop-filter: blur(14px) saturate(1.4); -webkit-backdrop-filter: blur(14px) saturate(1.4);
+}
+.mscope .top .back {
+	width: 40px; height: 40px; flex: none; border: 0; background: none; color: var(--fg-2);
+	display: grid; place-items: center; cursor: pointer; border-radius: 11px;
+}
+.mscope .top .back:active { background: var(--row-hover); }
+.mscope .top .ttl { font-size: 17px; font-weight: 650; letter-spacing: -0.02em; color: var(--fg-1); padding-left: 4px; }
+.mscope .top .ttl em { font-style: normal; background: var(--brand-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.mscope .top .sp { flex: 1; }
+.mscope .top .tact {
+	height: 40px; padding: 0 12px; border: 0; border-radius: 11px; background: none;
+	color: var(--iris); font-weight: 650; font-size: 14.5px; font-family: var(--font-ui); cursor: pointer;
+}
+.mscope .top .tact:disabled { color: var(--fg-4); }
+.mscope .top .cologo { max-height: 28px; max-width: 110px; width: auto; border-radius: 4px; margin-left: 4px; }
+
+/* ---------- Scroll body ---------- */
+.mscope .body { flex: 1; padding: 14px 14px calc(80px + env(safe-area-inset-bottom)); }
+.mscope .body.task { padding-bottom: calc(96px + env(safe-area-inset-bottom)); } /* room for the sticky action bar */
+.mscope .eyebrow2 { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-3); margin: 18px 2px 9px; }
+.mscope .eyebrow2:first-child { margin-top: 4px; }
+
+/* ---------- Bottom tab bar ---------- */
+.mscope .tabs {
+	position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+	display: flex; align-items: stretch;
+	padding-bottom: env(safe-area-inset-bottom);
+	background: var(--hdr-bg);
+	border-top: 1px solid var(--hairline);
+	backdrop-filter: blur(14px) saturate(1.4); -webkit-backdrop-filter: blur(14px) saturate(1.4);
+}
+.mscope .tabs a {
+	flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+	min-height: 58px; padding: 8px 2px 7px; text-decoration: none;
+	color: var(--fg-3); transition: color 0.15s var(--ease);
+}
+.mscope .tabs a .tl { font-size: 10.5px; font-weight: 600; }
+.mscope .tabs a svg { color: var(--fg-3); transition: color 0.15s var(--ease); }
+.mscope .tabs a.on, .mscope .tabs a.on svg { color: var(--iris); }
+
+/* ---------- Cards & list rows ---------- */
+.mscope .mcard {
+	background: var(--card-bg); border: 1px solid var(--hairline); border-radius: 16px;
+	box-shadow: var(--shadow-card), var(--inset-hi); overflow: hidden;
+}
+.mscope .lcard { display: flex; flex-direction: column; gap: 9px; }
+.mscope .lrow {
+	display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+	padding: 14px; border: 1px solid var(--hairline); border-radius: 15px; background: var(--card-bg);
+	cursor: pointer; text-decoration: none; box-shadow: var(--shadow-card);
+	transition: transform 0.12s var(--ease);
+}
+.mscope .lrow:active { transform: scale(0.99); background: var(--row-hover); }
+.mscope .lrow .glyph { width: 38px; height: 38px; flex: none; border-radius: 11px; display: grid; place-items: center; background: var(--iris-tint); color: var(--iris); }
+.mscope .lrow .tx { flex: 1; min-width: 0; }
+.mscope .lrow .l1 { font-size: 14.5px; font-weight: 600; color: var(--fg-1); display: flex; align-items: center; gap: 8px; }
+.mscope .lrow .l1 .id { font-family: var(--font-mono); font-size: 13px; color: var(--cyan); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A chip placed directly on line 1 (e.g. the request list status) hugs the right
+   edge; flex:none keeps it from being squeezed so the id truncates instead. */
+.mscope .lrow .l1 .chip { margin-left: auto; flex: none; }
+/* display:block is required for ellipsis — these lines are <span>s and would
+   otherwise stay inline (overflow/text-overflow ignored) and spill over. */
+.mscope .lrow .l2 { display: block; font-size: 12.5px; color: var(--fg-3); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Meta line: item count / category / priority on the left, date pinned right. */
+.mscope .lrow .l3 { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 5px; font-size: 11.5px; color: var(--fg-4); }
+.mscope .lrow .l3 .meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mscope .lrow .l3 .when { flex: none; font-family: var(--font-mono); }
+.mscope .lrow .l3 .hi { color: var(--err); font-weight: 600; }
+.mscope .lrow .chev { color: var(--fg-4); flex: none; }
+.mscope .lrow .rt { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex: none; }
+
+/* ---------- List search + status filter chips ---------- */
+.mscope .msearch {
+	display: flex; align-items: center; gap: 9px; height: 44px; padding: 0 13px; margin-bottom: 11px;
+	border: 1px solid var(--hairline); border-radius: 13px; background: var(--card-bg);
+	box-shadow: var(--shadow-card); transition: border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
+}
+.mscope .msearch:focus-within { border-color: var(--iris); box-shadow: 0 0 0 3px var(--iris-tint); }
+.mscope .msearch > svg { flex: none; color: var(--fg-3); }
+.mscope .msearch input {
+	flex: 1; min-width: 0; border: 0; background: none; outline: none;
+	font-family: var(--font-ui); font-size: 14.5px; color: var(--fg-1);
+}
+.mscope .msearch input::placeholder { color: var(--fg-4); }
+.mscope .msearch .msearch-x {
+	flex: none; width: 24px; height: 24px; display: grid; place-items: center; border: 0; cursor: pointer;
+	border-radius: 50%; background: var(--surface-3); color: var(--fg-3);
+}
+.mscope .mchips {
+	display: flex; gap: 8px; margin-bottom: 14px; padding-bottom: 2px;
+	overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.mscope .mchips::-webkit-scrollbar { display: none; }
+.mscope .mchip {
+	flex: none; display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px;
+	border: 1px solid var(--hairline); border-radius: 999px; background: var(--card-bg); color: var(--fg-2);
+	font-family: var(--font-ui); font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer;
+	transition: border-color 0.12s var(--ease), background 0.12s var(--ease), color 0.12s var(--ease), transform 0.12s var(--ease);
+}
+.mscope .mchip .cnt { font-family: var(--font-mono); font-size: 11px; color: var(--fg-4); }
+.mscope .mchip:active { transform: scale(0.96); }
+.mscope .mchip.on { border-color: var(--iris); background: var(--iris-tint); color: var(--iris); }
+.mscope .mchip.on .cnt { color: var(--iris); }
+
+/* ---------- Pull-to-refresh ---------- */
+.mscope { overscroll-behavior-y: contain; }
+.mscope .ptr { position: relative; }
+.mscope .ptr-ind { display: flex; align-items: flex-end; justify-content: center; overflow: hidden; }
+.mscope .ptr-spin { display: grid; place-items: center; width: 30px; height: 30px; margin-bottom: 8px; border-radius: 50%; background: var(--card-bg); border: 1px solid var(--hairline); color: var(--iris); box-shadow: var(--shadow-card); }
+.mscope .ptr-spin.on { animation: ptr-rot 0.7s linear infinite; }
+@keyframes ptr-rot { to { transform: rotate(360deg); } }
+
+/* ---------- Inline attachment thumbnails (detail views) ---------- */
+.mscope .attach { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-top: 4px; }
+.mscope .attach a { display: block; border-radius: 10px; overflow: hidden; border: 1px solid var(--hairline); background: var(--surface-3); }
+.mscope .attach img { display: block; width: 100%; height: 92px; object-fit: cover; }
+
+/* ---------- Related documents (detail sheets) ---------- */
+.mscope .reldoc-grp { margin-bottom: 10px; }
+.mscope .rd-lbl { font-size: 11px; font-weight: 600; color: var(--fg-3); margin: 2px 0 6px; }
+.mscope .reldoc { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border: 1px solid var(--hairline); border-radius: 11px; background: var(--card-bg); margin-bottom: 6px; }
+.mscope .rd-ic { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; background: var(--iris-tint); color: var(--iris); }
+.mscope .rd-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.mscope .rd-id { font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--cyan); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mscope .rd-meta { font-size: 11.5px; color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mscope .reldoc .chip { flex: none; }
+
+/* ---------- Profile ---------- */
+.mscope .profcard { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 24px 16px; border: 1px solid var(--hairline); border-radius: 16px; background: var(--card-bg); box-shadow: var(--shadow-card); margin-bottom: 16px; }
+.mscope .profcard .avatar { width: 74px; height: 74px; border-radius: 50%; display: grid; place-items: center; background: var(--iris-tint); color: var(--iris); font-size: 26px; font-weight: 700; overflow: hidden; margin-bottom: 12px; }
+.mscope .profcard .avatar img { width: 100%; height: 100%; object-fit: cover; }
+.mscope .profcard .pname { font-size: 18px; font-weight: 700; color: var(--fg-1); }
+.mscope .profcard .pmail { font-size: 13px; color: var(--fg-3); margin-top: 2px; }
+.mscope .prow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 14px; border: 1px solid var(--hairline); border-radius: 13px; background: var(--card-bg); }
+.mscope .prow .k { font-size: 13px; color: var(--fg-3); }
+.mscope .prow .v { font-size: 13.5px; font-weight: 600; color: var(--fg-1); text-align: right; }
+.mscope .rolewrap { display: flex; flex-wrap: wrap; gap: 8px; }
+.mscope .rolechip { padding: 6px 12px; border-radius: 999px; background: var(--surface-3); color: var(--fg-2); font-size: 12px; font-weight: 600; }
+
+/* ---------- Notifications ---------- */
+.mscope .ncard-list { display: flex; flex-direction: column; gap: 8px; }
+.mscope .ncard { position: relative; display: flex; gap: 11px; padding: 13px 14px; border: 1px solid var(--hairline); border-radius: 13px; background: var(--card-bg); }
+.mscope .ncard.unread { background: var(--iris-tint); }
+.mscope .ncard .nic { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: var(--surface-3); color: var(--iris); }
+.mscope .ncard .ntx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.mscope .ncard .nsub { font-size: 13.5px; font-weight: 600; color: var(--fg-1); line-height: 1.35; }
+.mscope .ncard .nwhen { font-size: 11.5px; color: var(--fg-4); font-family: var(--font-mono); }
+.mscope .ncard .ndot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--iris); align-self: center; }
+
+/* ---------- Header bell (notifications entry) ---------- */
+.mscope .top .bell { position: relative; width: 40px; height: 40px; flex: none; border: 0; background: none; color: var(--fg-2); display: grid; place-items: center; cursor: pointer; border-radius: 11px; }
+.mscope .top .bell:active { background: var(--row-hover); }
+.mscope .top .bell .dot { position: absolute; top: 7px; right: 7px; min-width: 8px; height: 8px; border-radius: 50%; background: var(--err); border: 2px solid var(--hdr-bg); }
+
+/* ---------- Collapsible date-range filter ---------- */
+.mscope .mdate { display: flex; align-items: center; gap: 10px; margin: -4px 0 14px; }
+.mscope .mdate .fld { flex: 1; min-width: 0; }
+.mscope .mdate .lbl { display: block; font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-4); margin: 0 0 4px 2px; }
+.mscope .mdate input { width: 100%; height: 40px; padding: 0 11px; border: 1px solid var(--hairline); border-radius: 11px; background: var(--card-bg); color: var(--fg-1); font-family: var(--font-ui); font-size: 13.5px; outline: none; }
+.mscope .mdate input:focus { border-color: var(--iris); box-shadow: 0 0 0 3px var(--iris-tint); }
+.mscope .mfilter-btn { flex: none; width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid var(--hairline); border-radius: 13px; background: var(--card-bg); color: var(--fg-2); cursor: pointer; box-shadow: var(--shadow-card); }
+.mscope .mfilter-btn.on { border-color: var(--iris); background: var(--iris-tint); color: var(--iris); }
+.mscope .msearchrow { display: flex; align-items: center; gap: 8px; }
+.mscope .msearchrow .msearch { flex: 1; margin-bottom: 11px; }
+
+/* ---------- KPI cards (home) ---------- */
+.mscope .kgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.mscope .kpi {
+	display: flex; flex-direction: column; gap: 0; padding: 16px; text-decoration: none;
+	background: var(--card-bg); border: 1px solid var(--hairline); border-radius: 16px; box-shadow: var(--shadow-card);
+	transition: transform 0.12s var(--ease);
+}
+.mscope .kpi:active { transform: scale(0.98); }
+.mscope .kpi .kic { width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; background: var(--iris-tint); color: var(--iris); margin-bottom: 12px; }
+.mscope .kpi.warn .kic { background: var(--pending-bg); color: var(--pending); }
+.mscope .kpi .kv { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 30px; font-weight: 700; color: var(--fg-1); letter-spacing: -0.02em; line-height: 1; }
+.mscope .kpi .kl { font-size: 12.5px; color: var(--fg-2); margin-top: 6px; }
+
+/* ---------- Form fields ---------- */
+.mscope .mfield { display: flex; flex-direction: column; gap: 7px; margin-bottom: 16px; }
+.mscope .mlabel { font-size: 12.5px; font-weight: 600; color: var(--fg-2); }
+.mscope .mlabel em { font-style: normal; color: var(--err); }
+.mscope .mhint { font-size: 11.5px; color: var(--fg-3); }
+.mscope .minp {
+	height: 50px; width: 100%; border-radius: 13px; border: 1px solid var(--hairline-2);
+	background: var(--surface-1); color: var(--fg-1); padding: 0 14px;
+	font-family: var(--font-ui); font-size: 15px; outline: none;
+	transition: border-color 0.18s var(--ease), box-shadow 0.18s var(--ease);
+}
+.mscope textarea.minp { height: auto; padding: 12px 14px; line-height: 1.5; resize: vertical; }
+.mscope .minp:focus { border-color: var(--iris); box-shadow: 0 0 0 3px var(--iris-tint); }
+.mscope select.minp { appearance: none; -webkit-appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--fg-3) 50%), linear-gradient(135deg, var(--fg-3) 50%, transparent 50%); background-position: calc(100% - 18px) 23px, calc(100% - 13px) 23px; background-size: 5px 5px; background-repeat: no-repeat; }
+/* reused SearchSelect inside the mobile scope: enlarge to match */
+.mscope .swrap .inp { height: 50px; font-size: 15px; border-radius: 13px; }
+
+/* segmented control */
+.mscope .seg { display: flex; gap: 8px; }
+.mscope .seg button {
+	flex: 1; height: 46px; border-radius: 12px; border: 1px solid var(--hairline-2);
+	background: var(--surface-1); color: var(--fg-2); font-family: var(--font-ui); font-weight: 600; font-size: 14px; cursor: pointer;
+}
+.mscope .seg button.on { border-color: var(--iris); background: var(--iris-tint); color: var(--iris); }
+
+/* ---------- Item cards (MR create) ---------- */
+.mscope .item { padding: 13px 14px; border-top: 1px solid var(--hairline); }
+.mscope .item:first-child { border-top: 0; }
+.mscope .item .ih { display: flex; align-items: flex-start; gap: 10px; }
+.mscope .item .inm { flex: 1; min-width: 0; }
+.mscope .item .inm .t1 { font-size: 14.5px; font-weight: 600; color: var(--fg-1); line-height: 1.3; }
+.mscope .item .inm .t2 { font-family: var(--font-mono); font-size: 11.5px; color: var(--cyan); margin-top: 2px; }
+.mscope .item .rm { width: 34px; height: 34px; flex: none; border: 0; border-radius: 9px; background: var(--surface-3); color: var(--fg-3); display: grid; place-items: center; cursor: pointer; }
+.mscope .item .rm:active { color: var(--err); }
+.mscope .item .qrow { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.mscope .stepper { display: inline-flex; align-items: center; border: 1px solid var(--hairline-2); border-radius: 12px; overflow: hidden; background: var(--surface-1); }
+.mscope .stepper button { width: 46px; height: 48px; border: 0; background: none; color: var(--iris); font-size: 22px; line-height: 1; cursor: pointer; display: grid; place-items: center; }
+.mscope .stepper button:active { background: var(--iris-tint); }
+.mscope .stepper input { width: 70px; height: 48px; border: 0; border-left: 1px solid var(--hairline); border-right: 1px solid var(--hairline); text-align: center; background: transparent; color: var(--fg-1); font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 16px; outline: none; }
+.mscope .uomtag { font-size: 13px; color: var(--fg-2); font-weight: 500; }
+.mscope .uomsel { height: 48px; min-width: 88px; border: 1px solid var(--hairline-2); border-radius: 12px; background: var(--surface-1); color: var(--fg-1); font-size: 15px; padding: 0 10px; font-family: var(--font-ui); }
+.mscope .item .ispec { height: 44px; margin-top: 8px; font-size: 14px; }
+.mscope .additem { padding: 13px 14px; border-top: 1px solid var(--hairline); }
+
+/* receipt photo-capture tiles */
+.mscope .mphotos { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.mscope .mphoto { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; min-height: 96px; padding: 14px 10px; border: 1.5px dashed var(--hairline-2); border-radius: 14px; background: var(--surface-1); color: var(--fg-3); cursor: pointer; text-align: center; }
+.mscope .mphoto:active { background: var(--row-hover); }
+.mscope .mphoto.has { border-style: solid; border-color: var(--iris); color: var(--iris); }
+.mscope .mphoto .pl { font-size: 12.5px; font-weight: 600; }
+.mscope .mphoto .ps { font-size: 10.5px; color: var(--fg-4); word-break: break-all; }
+.mscope .mphoto.has .ps { color: var(--iris); }
+
+/* ---------- Buttons & sticky action bar ---------- */
+.mscope .mbtn {
+	display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+	width: 100%; min-height: 52px; border-radius: 14px; border: 1px solid var(--iris);
+	background: var(--iris); color: #fff; font-family: var(--font-ui); font-size: 15.5px; font-weight: 650; cursor: pointer;
+	box-shadow: var(--shadow-brand); transition: transform 0.12s var(--ease), filter 0.12s var(--ease);
+}
+.mscope .mbtn:active { transform: scale(0.99); filter: brightness(0.96); }
+.mscope .mbtn:disabled { opacity: 0.55; box-shadow: none; }
+.mscope .mbtn.sec { background: var(--surface-1); color: var(--fg-1); border-color: var(--hairline-2); box-shadow: none; }
+.mscope .mbtn.danger { background: var(--err-solid); border-color: var(--err-solid); }
+.mscope .mbtn.sm { min-height: 46px; font-size: 14.5px; }
+.mscope .actionbar {
+	position: fixed; left: 0; right: 0; bottom: 0; z-index: 45;
+	display: flex; gap: 10px; padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+	background: var(--hdr-bg); border-top: 1px solid var(--hairline);
+	backdrop-filter: blur(14px) saturate(1.4); -webkit-backdrop-filter: blur(14px) saturate(1.4);
+}
+.mscope .actionbar .mbtn.grow { flex: 1; }
+.mscope .draftlink { background: none; border: 0; color: var(--fg-2); font-family: var(--font-ui); font-size: 14px; font-weight: 600; cursor: pointer; padding: 0 14px; }
+
+/* FAB */
+.mscope .fab {
+	position: fixed; right: 16px; bottom: calc(74px + env(safe-area-inset-bottom)); z-index: 46;
+	display: inline-flex; align-items: center; gap: 8px; height: 52px; padding: 0 20px 0 18px;
+	border: 0; border-radius: 26px; background: var(--iris); color: #fff;
+	font-family: var(--font-ui); font-size: 15px; font-weight: 650; cursor: pointer; box-shadow: var(--shadow-brand);
+}
+.mscope .fab:active { filter: brightness(0.96); }
+
+/* ---------- Status chip (reuses .tag tones via tokens) ---------- */
+.mscope .chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.mscope .chip::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.mscope .chip.ok { color: var(--ok); background: var(--ok-bg); }
+.mscope .chip.pend { color: var(--pending); background: var(--pending-bg); }
+.mscope .chip.err { color: var(--err); background: var(--err-bg); }
+.mscope .chip.neutral { color: var(--fg-3); background: var(--surface-3); }
+.mscope .prio { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.mscope .prio.High { color: var(--err); }
+.mscope .prio.Medium { color: var(--pending); }
+.mscope .prio.Low { color: var(--fg-3); }
+
+/* ---------- Empty / loading ---------- */
+.mscope .mempty { padding: 56px 24px; text-align: center; color: var(--fg-3); }
+.mscope .mempty .ei { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; background: var(--surface-3); color: var(--fg-3); margin: 0 auto 14px; }
+.mscope .mempty .et { font-size: 15px; font-weight: 600; color: var(--fg-1); }
+.mscope .mempty .es { font-size: 13px; margin-top: 4px; }
+.mscope .mload { padding: 48px; text-align: center; color: var(--fg-3); font-size: 13.5px; }
+.mscope .malert { display: flex; gap: 9px; align-items: flex-start; padding: 11px 14px; border-radius: 12px; background: var(--err-bg); border: 1px solid rgba(200, 71, 94, 0.25); color: var(--fg-1); font-size: 13px; margin-bottom: 14px; }
+.mscope .malert svg { color: var(--err); flex: none; margin-top: 1px; }
+
+/* ---------- Bottom sheet (detail / actions) ---------- */
+.mscope-sheet-overlay {
+	position: fixed; inset: 0; z-index: 95; background: rgba(10, 13, 19, 0.5);
+	backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+	display: flex; flex-direction: column; justify-content: flex-end;
+}
+.mscope-sheet {
+	background: var(--card-bg); border-top: 1px solid var(--hairline);
+	border-radius: 20px 20px 0 0; max-height: 88vh; display: flex; flex-direction: column;
+	box-shadow: var(--shadow-pop), var(--inset-hi);
+	animation: mSheetUp 0.28s var(--spring) both;
+	padding-bottom: env(safe-area-inset-bottom);
+}
+@keyframes mSheetUp { from { transform: translateY(100%); } to { transform: none; } }
+.mscope-sheet .grab { width: 38px; height: 4px; border-radius: 2px; background: var(--hairline-2); margin: 9px auto 4px; flex: none; }
+.mscope-sheet .sh { display: flex; align-items: center; gap: 10px; padding: 10px 16px 12px; border-bottom: 1px solid var(--hairline); flex: none; }
+.mscope-sheet .sh .st { font-size: 16px; font-weight: 650; color: var(--fg-1); }
+.mscope-sheet .sh .sid { font-family: var(--font-mono); font-size: 13px; color: var(--cyan); }
+.mscope-sheet .sh .x { margin-left: auto; width: 36px; height: 36px; border: 0; border-radius: 10px; background: var(--surface-3); color: var(--fg-2); display: grid; place-items: center; cursor: pointer; }
+.mscope-sheet .sbody { overflow-y: auto; padding: 14px 16px; }
+.mscope-sheet .confirm-body { padding: 18px 18px 6px; }
+.mscope-sheet .confirm-t { font-size: 16.5px; font-weight: 650; color: var(--fg-1); }
+.mscope-sheet .confirm-m { font-size: 13.5px; color: var(--fg-2); margin-top: 6px; line-height: 1.5; }
+.mscope-sheet .sfoot { display: flex; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--hairline); flex: none; }
+
+/* fact rows + item rows inside the sheet */
+.mscope .fct { display: flex; justify-content: space-between; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--hairline); font-size: 13.5px; }
+.mscope .fct:last-of-type { border-bottom: 0; }
+.mscope .fct .k { color: var(--fg-3); font-weight: 600; }
+.mscope .fct .v { color: var(--fg-1); font-weight: 500; text-align: right; }
+.mscope .iline { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--hairline); }
+.mscope .iline:last-child { border-bottom: 0; }
+.mscope .iline .inm2 { flex: 1; min-width: 0; }
+.mscope .iline .inm2 .t1 { font-size: 14px; font-weight: 600; color: var(--fg-1); }
+.mscope .iline .inm2 .t2 { font-family: var(--font-mono); font-size: 11px; color: var(--cyan); }
+.mscope .iline .iq { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 600; color: var(--fg-1); white-space: nowrap; }
+
+/* ============================================================
+   Foldables / tablets / wide screens
+   The app is phone-first and has no intrinsic max-width, so on an UNFOLDED
+   foldable (wide viewport) it stretched edge-to-edge and looked small & sparse.
+   Keep it a centered, comfortable-width column instead — the sticky top bar
+   scrolls inside it, and the FIXED bottom tabs / action bar / bottom sheets are
+   centered to the same column so everything lines up.
+   ============================================================ */
+@media (min-width: 600px) {
+	.mscope {
+		max-width: 600px;
+		margin-inline: auto;
+		border-inline: 1px solid var(--hairline);
+	}
+	.mscope .tabs,
+	.mscope .actionbar {
+		left: 0;
+		right: 0;
+		width: 100%;
+		max-width: 600px;
+		margin-inline: auto;
+		border-inline: 1px solid var(--hairline);
+	}
+	.mscope-sheet {
+		max-width: 600px;
+		margin-inline: auto;
+	}
+}

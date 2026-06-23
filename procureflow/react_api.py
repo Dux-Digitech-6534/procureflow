@@ -43,11 +43,22 @@ def _uniq(seq):
     return out
 
 
+def _filter_owner_only_actions(doc, actions):
+    """'Send for Approval' is the request OWNER's submit step (the SPA exposes it
+    as the create/submit button on the editable form). Never offer it to another
+    user — e.g. an approver who also holds the Supervisor role — on a document
+    they did not create. Approve / Reject / Reopen are unaffected."""
+    if frappe.session.user != getattr(doc, "owner", None):
+        return [a for a in actions if "send for approval" not in (a or "").lower()]
+    return actions
+
+
 def _doc_actions(doctype, name, state):
     if state not in ACTIONABLE_STATES.get(doctype, set()):
         return []
     try:
-        return _uniq(t.action for t in get_transitions(frappe.get_doc(doctype, name)))
+        doc = frappe.get_doc(doctype, name)
+        return _filter_owner_only_actions(doc, _uniq(t.action for t in get_transitions(doc)))
     except Exception:
         return []
 
@@ -75,7 +86,7 @@ def _doc_action_state(doc):
     """
     transitions = []
     try:
-        transitions = _uniq(t.action for t in get_transitions(doc))
+        transitions = _filter_owner_only_actions(doc, _uniq(t.action for t in get_transitions(doc)))
     except Exception:
         transitions = []
     can_cancel = bool(doc.docstatus == 1 and frappe.has_permission(doc.doctype, "cancel", doc))
@@ -515,8 +526,9 @@ def save_purchase_order(data):
 
     doc.supplier = supplier
     doc.company = _company()
-    doc.transaction_date = nowdate()
-    doc.schedule_date = data.get("schedule_date") or nowdate()
+    # Order date is user-settable so a PO can be back-dated; default to today.
+    doc.transaction_date = data.get("transaction_date") or nowdate()
+    doc.schedule_date = data.get("schedule_date") or doc.transaction_date
     doc.custom_category = data.get("category")
     doc.custom_project_name = project
     if set_warehouse:
@@ -638,6 +650,7 @@ def po_detail(name):
                 "material_request": it.get("material_request"),
                 "material_request_item": it.get("material_request_item"),
                 "sub_category": frappe.db.get_value("Item", it.item_code, "custom_sub_category"),
+                "category": frappe.db.get_value("Item", it.item_code, "custom_category"),
             }
         )
     taxes = [
@@ -656,6 +669,7 @@ def po_detail(name):
         "company": doc.get("custom_test_company_"),
         "tax_type": doc.get("custom_tax_type"),
         "remark": doc.custom_remark,
+        "transaction_date": doc.transaction_date,
         "schedule_date": doc.schedule_date,
         "workflow_state": doc.workflow_state,
         "status": doc.status,
@@ -805,7 +819,7 @@ def receivable_pos():
     return frappe.get_all(
         "Purchase Order",
         filters={"docstatus": 1, "per_received": ["<", 100], "status": ["not in", ["Closed"]]},
-        fields=["name", "supplier", "supplier_name", "custom_project_name", "grand_total", "transaction_date"],
+        fields=["name", "supplier", "supplier_name", "custom_project_name", "grand_total", "transaction_date", "per_received"],
         order_by="transaction_date desc",
         limit_page_length=100,
     )
@@ -935,9 +949,12 @@ def pr_detail(name):
         "posting_date": doc.posting_date,
         "grand_total": doc.grand_total,
         "payment_status": doc.get("custom_payment_status"),
+        "docstatus": doc.docstatus,
         "total": info["total"],
         "paid": info["paid"],
         "outstanding": info["outstanding"],
+        "material_image": doc.get("custom_add_material"),
+        "invoice_image": doc.get("custom_add_invoice"),
         "items": [
             {"item_code": it.item_code, "item_name": it.item_name, "qty": it.qty, "uom": it.uom, "rate": it.rate, "amount": it.amount}
             for it in doc.items
@@ -997,6 +1014,53 @@ def settings_can_create():
         "Material Category", "Material Sub Category", "Warehouse", "UOM",
     ]
     return {dt: bool(frappe.has_permission(dt, "create")) for dt in dts}
+
+
+@frappe.whitelist()
+def rename_master(doctype, old_name, new_name, field=None):
+    """Rename a master record — cascading the rename to every document that
+    links to it — and sync its display field. Lets the Settings page edit a
+    master's NAME safely (a plain field update would desync name vs links)."""
+    allowed = {
+        "Supplier", "Item", "Company Master", "Project Master",
+        "Material Category", "Material Sub Category", "Warehouse", "UOM",
+    }
+    if doctype not in allowed:
+        frappe.throw(_("Cannot rename {0}.").format(doctype))
+    if not frappe.has_permission(doctype, "write"):
+        frappe.throw(_("You are not allowed to edit {0}.").format(doctype))
+    new_name = (new_name or "").strip()
+    if not new_name:
+        frappe.throw(_("Name is required."))
+    if new_name != old_name:
+        if frappe.db.exists(doctype, new_name):
+            frappe.throw(_("{0} '{1}' already exists.").format(doctype, new_name))
+        frappe.rename_doc(doctype, old_name, new_name, force=True, merge=False)
+    if field and frappe.get_meta(doctype).has_field(field):
+        frappe.db.set_value(doctype, new_name, field, new_name)
+    frappe.db.commit()
+    return new_name
+
+
+@frappe.whitelist()
+def update_master(doctype, name, values):
+    """Update non-identity fields of a master record from the Settings page.
+    Permission-checked; only the whitelisted master doctypes are editable."""
+    allowed = {
+        "Supplier", "Item", "Company Master", "Project Master",
+        "Material Category", "Material Sub Category", "Warehouse", "UOM",
+    }
+    if doctype not in allowed:
+        frappe.throw(_("Cannot edit {0}.").format(doctype))
+    doc = frappe.get_doc(doctype, name)
+    doc.check_permission("write")
+    values = _loads(values) or {}
+    meta = frappe.get_meta(doctype)
+    for k, v in values.items():
+        if meta.has_field(k):
+            doc.set(k, v)
+    doc.save()
+    return doc.name
 
 
 @frappe.whitelist()
@@ -1108,6 +1172,89 @@ def doc_links(doctype, name):
         groups.append({"kind": kind, "label": label, "route": route, "items": [build(n) for n in names]})
 
     return {"groups": groups}
+
+
+# ===========================================================================
+# Profile, Notifications, Stock — mobile-app screens
+# ===========================================================================
+
+# Procurement roles surfaced first on the profile screen (most meaningful here).
+_PROCURE_ROLES = [
+    "PO Approver", "Purchase Officer", "Material Request Approval",
+    "Purchase Manager", "Purchase User", "Supervisor", "Stock Manager", "Stock User",
+]
+
+
+@frappe.whitelist()
+def user_info():
+    """Identity for the mobile Profile screen: name/email/photo, company, roles."""
+    user = frappe.session.user
+    u = frappe.db.get_value("User", user, ["full_name", "email", "user_image"], as_dict=True) or {}
+    roles = [r for r in frappe.get_roles(user) if r not in ("All", "Guest")]
+    roles.sort(key=lambda r: (_PROCURE_ROLES.index(r) if r in _PROCURE_ROLES else 99, r))
+    company = (
+        frappe.defaults.get_user_default("company")
+        or frappe.db.get_single_value("Global Defaults", "default_company")
+    )
+    return {
+        "user": user,
+        "full_name": u.get("full_name") or user,
+        "email": u.get("email") or user,
+        "user_image": u.get("user_image"),
+        "company": company,
+        "roles": roles,
+    }
+
+
+@frappe.whitelist()
+def notifications(limit=20):
+    """The current user's latest Frappe Notification Log entries + unread count."""
+    user = frappe.session.user
+    items = frappe.get_all(
+        "Notification Log",
+        filters={"for_user": user},
+        fields=["name", "subject", "type", "document_type", "document_name", "read", "creation"],
+        order_by="creation desc",
+        limit_page_length=int(limit),
+    )
+    unread = frappe.db.count("Notification Log", {"for_user": user, "read": 0})
+    return {"items": items, "unread": unread}
+
+
+@frappe.whitelist()
+def mark_notifications_read():
+    """Mark all of the current user's notifications as read; returns new unread count."""
+    user = frappe.session.user
+    frappe.db.set_value("Notification Log", {"for_user": user, "read": 0}, "read", 1, update_modified=False)
+    frappe.db.commit()
+    return frappe.db.count("Notification Log", {"for_user": user, "read": 0})
+
+
+@frappe.whitelist()
+def stock_balances(search="", limit=500):
+    """On-hand stock from Bin (item / warehouse / actual_qty) for the Stock screen.
+    Only non-zero balances; item names attached; client-style search across
+    item code, item name and warehouse over the fetched window."""
+    rows = frappe.get_all(
+        "Bin",
+        filters={"actual_qty": ["!=", 0]},
+        fields=["item_code", "warehouse", "actual_qty", "stock_uom"],
+        order_by="item_code asc",
+        limit_page_length=int(limit),
+    )
+    codes = list({r.item_code for r in rows})
+    names = {}
+    if codes:
+        for it in frappe.get_all("Item", filters={"name": ["in", codes]}, fields=["name", "item_name"], limit_page_length=0):
+            names[it.name] = it.item_name
+    s = (search or "").strip().lower()
+    out = []
+    for r in rows:
+        r["item_name"] = names.get(r.item_code, r.item_code)
+        if s and s not in (r.item_code or "").lower() and s not in (r.item_name or "").lower() and s not in (r.warehouse or "").lower():
+            continue
+        out.append(r)
+    return out
 
 
 # ============================================================
@@ -1229,6 +1376,21 @@ def _rb_outstanding_ageing(f):
     if want and want != "all":
         out = [r for r in out if r["bucket"] == want]
     out.sort(key=lambda r: -r["days_outstanding"])
+    # Attach the items bought on each receipt, so it's clear what each pending
+    # payment is against (one batched query for all receipts in the result).
+    pr_names = list({r.get("purchase_receipt") for r in out if r.get("purchase_receipt")})
+    if pr_names:
+        imap = defaultdict(list)
+        for it in frappe.get_all(
+            "Purchase Receipt Item",
+            filters={"parent": ["in", pr_names]},
+            fields=["parent", "item_name", "item_code"],
+            order_by="idx asc",
+            limit_page_length=0,
+        ):
+            imap[it["parent"]].append(it.get("item_name") or it.get("item_code"))
+        for r in out:
+            r["items"] = ", ".join(imap.get(r.get("purchase_receipt"), []))
     return out
 
 
@@ -1378,6 +1540,7 @@ _REPORTS = {
         ("project", "Project", "text"), ("purchase_receipt", "Receipt", "text"), ("amount", "Amount", "money")]),
     "outstanding-ageing": (_rb_outstanding_ageing, [
         ("purchase_receipt", "Receipt", "text"), ("supplier", "Supplier", "text"), ("project", "Project", "text"),
+        ("items", "Items", "text"),
         ("receipt_date", "Posting Date", "date"), ("days_outstanding", "Days", "num"),
         ("total_amount", "Total", "money"), ("paid_amount", "Paid", "money"),
         ("outstanding_amount", "Outstanding", "money"), ("bucket", "Ageing", "text")]),

@@ -234,17 +234,6 @@
     "workflow_builder_id": "action-3"
    },
    {
-    "action": "Reopen",
-    "allow_self_approval": 1,
-    "allowed": "Material Request Approval",
-    "condition": null,
-    "next_state": "Draft",
-    "send_email_to_creator": 0,
-    "state": "Rejected",
-    "transition_tasks": null,
-    "workflow_builder_id": "action-5"
-   },
-   {
     "action": "Send for Approval",
     "allow_self_approval": 1,
     "allowed": "Supervisor",

@@ -21,6 +21,9 @@ export interface Column<T> {
 	/** Provide to make the column sortable; returns the comparable value. */
 	sortValue?: (row: T) => string | number | null | undefined;
 	thStyle?: CSSProperties;
+	/** Label shown before the cell value in the mobile stacked-card layout.
+	 *  Defaults to `header` when it's a plain string. */
+	cardLabel?: string;
 }
 
 interface SelectFilter<T> {
@@ -269,7 +272,11 @@ export function DataTable<T>({
 							{filtered.map((r) => (
 								<tr key={rowKey(r)} onClick={onRowClick ? () => onRowClick(r) : undefined}>
 									{columns.map((c) => (
-										<td key={c.key} style={{ textAlign: c.align ?? 'left' }}>
+										<td
+											key={c.key}
+											style={{ textAlign: c.align ?? 'left' }}
+											data-label={c.cardLabel ?? (typeof c.header === 'string' ? c.header : undefined)}
+										>
 											{c.render(r)}
 										</td>
 									))}

@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt, nowdate
+from frappe.utils import flt, getdate, nowdate
 
 from procureflow.api import populate_purchase_receipt_project_company_from_purchase_order
 
@@ -36,6 +36,9 @@ class ProcureflowPaymentEntry(Document):
     def validate_required_values(self):
         if not self.payment_date:
             self.payment_date = nowdate()
+
+        if getdate(self.payment_date) > getdate(nowdate()):
+            frappe.throw(_("Payment date cannot be in the future."))
 
         if not self.purchase_receipt:
             frappe.throw(_("Purchase Receipt is required."))

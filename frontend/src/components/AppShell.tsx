@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useFrappeAuth } from 'frappe-react-sdk';
 import { Icon, type IconName } from './Icon';
 import { useTheme } from '../lib/theme';
@@ -13,6 +13,17 @@ const NAV: { to: string; label: string; icon: IconName }[] = [
 	{ to: '/payments', label: 'Payments', icon: 'banknote' },
 	{ to: '/reports', label: 'Reports', icon: 'file-text-alt' },
 ];
+
+// Phone bottom-tab bar: the four core documents get a thumb-reachable tab; the
+// rest (Dashboard, Payments, Reports, Settings, theme) live behind "More".
+const MOBILE_PRIMARY: { to: string; short: string; icon: IconName }[] = [
+	{ to: '/material-requests', short: 'Requests', icon: 'file-text' },
+	{ to: '/purchase-orders', short: 'Orders', icon: 'cube' },
+	{ to: '/receipts', short: 'Receipts', icon: 'package' },
+	{ to: '/approvals', short: 'Approvals', icon: 'shield-check' },
+];
+const PRIMARY_SET = new Set(MOBILE_PRIMARY.map((i) => i.to));
+const MOBILE_MORE = NAV.filter((i) => !PRIMARY_SET.has(i.to));
 
 const BRAND = import.meta.env.BASE_URL + 'brand/';
 const COMPANY_LOGO = '/assets/procureflow/img/sanskruti-group-asia-logo.png';
@@ -35,11 +46,45 @@ function getInitialCollapsed(): boolean {
 }
 
 const linkClass = ({ isActive }: { isActive: boolean }) => (isActive ? 'on' : '');
+const tabClass = ({ isActive }: { isActive: boolean }) => (isActive ? 'mtab on' : 'mtab');
+
+/** True when the viewport is phone-width — reactive to rotation / fold-unfold.
+ *  Used to bounce a phone visitor off the desktop site onto the /m mobile app. */
+function usePhoneWidth(): boolean {
+	const [phone, setPhone] = useState(() => window.matchMedia('(max-width: 700px)').matches);
+	useEffect(() => {
+		const mq = window.matchMedia('(max-width: 700px)');
+		const on = () => setPhone(mq.matches);
+		mq.addEventListener('change', on);
+		return () => mq.removeEventListener('change', on);
+	}, []);
+	return phone;
+}
+
+/** Map a desktop route to its closest /m equivalent (else the mobile home). */
+function mapToMobile(path: string): string {
+	if (path.startsWith('/material-requests/new')) return '/m/requests/new';
+	if (path.startsWith('/material-requests')) return '/m/requests';
+	if (path.startsWith('/approvals')) return '/m/approvals';
+	if (path.startsWith('/receipts')) return '/m/receipts';
+	return '/m';
+}
 
 export function AppShell() {
 	const { theme, toggle } = useTheme();
-	const { currentUser } = useFrappeAuth();
+	const { currentUser, logout } = useFrappeAuth();
 	const [collapsed, setCollapsed] = useState(getInitialCollapsed);
+	const [moreOpen, setMoreOpen] = useState(false);
+	const isPhone = usePhoneWidth();
+	const location = useLocation();
+
+	async function doLogout() {
+		try {
+			await logout();
+		} finally {
+			window.location.href = '/login';
+		}
+	}
 
 	useEffect(() => {
 		try {
@@ -48,6 +93,11 @@ export function AppShell() {
 			/* not persistable — toggle still works this session */
 		}
 	}, [collapsed]);
+
+	// (a) A phone-width visitor on the desktop site is sent to the dedicated /m
+	// mobile app (mapped to the matching screen). Tablets/foldables-unfolded keep
+	// the full back-office. Browser "Desktop site" widens the viewport to escape.
+	if (isPhone) return <Navigate to={mapToMobile(location.pathname)} replace />;
 
 	return (
 		<div className="layout">
@@ -93,6 +143,9 @@ export function AppShell() {
 					<button className="icbtn" onClick={toggle} title="Toggle theme" aria-label="Toggle theme">
 						<Icon name={theme === 'dark' ? 'sun' : 'moon'} size={17} />
 					</button>
+					<button className="icbtn" onClick={() => void doLogout()} title="Log out" aria-label="Log out">
+						<Icon name="logout" size={16} />
+					</button>
 					<div className="usr" title={currentUser ?? ''}>
 						{initialsOf(currentUser)}
 					</div>
@@ -100,7 +153,75 @@ export function AppShell() {
 			</aside>
 
 			<div className="content">
+				{/* Phone-only top bar (hidden ≥700px via CSS) */}
+				<header className="mtopbar">
+					<img className="mlogo" src={COMPANY_LOGO} alt="Sanskruti" />
+					<div className="mtitle">
+						Procure<em>Flow</em>
+					</div>
+					<div className="spacer" />
+					<button className="icbtn" onClick={toggle} title="Toggle theme" aria-label="Toggle theme">
+						<Icon name={theme === 'dark' ? 'sun' : 'moon'} size={17} />
+					</button>
+					<div className="usr" title={currentUser ?? ''}>
+						{initialsOf(currentUser)}
+					</div>
+				</header>
+
 				<Outlet />
+
+				{/* Phone-only bottom tab bar (hidden ≥700px via CSS) */}
+				<nav className="mbottomnav">
+					{MOBILE_PRIMARY.map((item) => (
+						<NavLink key={item.to} to={item.to} className={tabClass}>
+							<Icon name={item.icon} size={19} />
+							<span className="mtl">{item.short}</span>
+						</NavLink>
+					))}
+					<button
+						type="button"
+						className={moreOpen ? 'mtab on' : 'mtab'}
+						onClick={() => setMoreOpen(true)}
+						aria-haspopup="dialog"
+						aria-expanded={moreOpen}
+					>
+						<Icon name="sliders" size={19} />
+						<span className="mtl">More</span>
+					</button>
+				</nav>
+
+				{moreOpen && (
+					<div
+						className="msheet-overlay"
+						onClick={(e) => {
+							if (e.target === e.currentTarget) setMoreOpen(false);
+						}}
+					>
+						<div className="msheet" role="dialog" aria-label="More navigation">
+							<div className="msheet-grab" />
+							<div className="msheet-list">
+								{MOBILE_MORE.map((item) => (
+									<NavLink key={item.to} to={item.to} className={linkClass} onClick={() => setMoreOpen(false)}>
+										<Icon name={item.icon} size={17} />
+										<span>{item.label}</span>
+									</NavLink>
+								))}
+								<NavLink to="/settings" className={linkClass} onClick={() => setMoreOpen(false)}>
+									<Icon name="sliders" size={17} />
+									<span>Settings</span>
+								</NavLink>
+							</div>
+							<div className="msheet-foot">
+								<button className="msheet-logout" onClick={() => void doLogout()}>
+									<Icon name="logout" size={17} /> Log out
+								</button>
+								<span className="msheet-user" title={currentUser ?? ''}>
+									{currentUser}
+								</span>
+							</div>
+						</div>
+					</div>
+				)}
 			</div>
 		</div>
 	);

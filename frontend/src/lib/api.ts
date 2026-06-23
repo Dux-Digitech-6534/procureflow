@@ -28,6 +28,12 @@ export const API = {
 	paymentDetail: 'procureflow.react_api.payment_detail',
 	docLinks: 'procureflow.react_api.doc_links',
 	settingsCanCreate: 'procureflow.react_api.settings_can_create',
+	renameMaster: 'procureflow.react_api.rename_master',
+	updateMaster: 'procureflow.react_api.update_master',
+	userInfo: 'procureflow.react_api.user_info',
+	notifications: 'procureflow.react_api.notifications',
+	markNotificationsRead: 'procureflow.react_api.mark_notifications_read',
+	stockBalances: 'procureflow.react_api.stock_balances',
 	dashboardData: 'procureflow.dashboard_api.get_procurement_dashboard_data',
 	paymentDashboard: 'procureflow.dashboard_api.get_payment_tracking_dashboard_data',
 	poRegister: 'procureflow.react_api.po_register',
@@ -375,6 +381,7 @@ export interface PoLine {
 	material_request: string | null;
 	material_request_item: string | null;
 	sub_category: string | null;
+	category: string | null;
 }
 
 export interface PoTaxRow {
@@ -391,6 +398,7 @@ export interface PoDetail extends DocActionState {
 	company: string | null;
 	tax_type: string | null;
 	remark: string | null;
+	transaction_date: string | null;
 	schedule_date: string | null;
 	workflow_state: string | null;
 	status: string | null;
@@ -461,6 +469,7 @@ export interface ReceivablePo {
 	custom_project_name: string | null;
 	grand_total: number | null;
 	transaction_date: string | null;
+	per_received: number | null;
 }
 
 export interface PoReceiptItem {
@@ -530,9 +539,12 @@ export interface PrDetail {
 	posting_date: string | null;
 	grand_total: number | null;
 	payment_status: string | null;
+	docstatus: number;
 	total: number;
 	paid: number;
 	outstanding: number;
+	material_image: string | null;
+	invoice_image: string | null;
 	items: PrDetailItem[];
 }
 
@@ -599,4 +611,38 @@ export function payTone(status: string | null | undefined): 'ok' | 'pend' | 'err
 	if (status === 'Fully Paid') return 'ok';
 	if (status === 'Partially Paid') return 'pend';
 	return 'err';
+}
+
+/* ------------------- Mobile: profile / notifications / stock ------------------- */
+
+export interface UserInfo {
+	user: string;
+	full_name: string;
+	email: string;
+	user_image: string | null;
+	company: string | null;
+	roles: string[];
+}
+
+export interface NotificationItem {
+	name: string;
+	subject: string;
+	type: string | null;
+	document_type: string | null;
+	document_name: string | null;
+	read: number;
+	creation: string;
+}
+
+export interface NotificationsResult {
+	items: NotificationItem[];
+	unread: number;
+}
+
+export interface StockRow {
+	item_code: string;
+	item_name: string;
+	warehouse: string;
+	actual_qty: number;
+	stock_uom: string | null;
 }

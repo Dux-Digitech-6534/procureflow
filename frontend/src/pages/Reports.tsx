@@ -152,6 +152,7 @@ export const REPORT_DEFS: ReportDef[] = [
 			{ key: 'purchase_receipt', label: 'Receipt', type: 'link', link: (r) => `/receipts/${r.purchase_receipt}` },
 			{ key: 'supplier', label: 'Supplier' },
 			{ key: 'project', label: 'Project' },
+			{ key: 'items', label: 'Items' },
 			{ key: 'receipt_date', label: 'Posting Date', type: 'date' },
 			{ key: 'days_outstanding', label: 'Days', type: 'num', align: 'right' },
 			{ key: 'total_amount', label: 'Total', type: 'money', align: 'right' },

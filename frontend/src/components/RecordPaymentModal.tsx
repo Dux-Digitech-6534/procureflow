@@ -19,6 +19,7 @@ export interface PayableReceipt {
 export function RecordPaymentModal({ pr, onClose, onSaved }: { pr: PayableReceipt; onClose: () => void; onSaved: () => void }) {
 	const { call: save, loading } = useFrappePostCall<{ message: { name: string } }>(API.savePayment);
 	const toast = useToast();
+	const today = new Date().toLocaleDateString('en-CA'); // local YYYY-MM-DD
 	const [amount, setAmount] = useState(String(pr.outstanding));
 	const [date, setDate] = useState('');
 	const [remark, setRemark] = useState('');
@@ -29,6 +30,7 @@ export function RecordPaymentModal({ pr, onClose, onSaved }: { pr: PayableReceip
 		const amt = Number(amount) || 0;
 		if (amt <= 0) return setErr('Enter an amount greater than zero.');
 		if (amt > pr.outstanding + 0.001) return setErr('Amount cannot exceed the outstanding amount.');
+		if (date && date > today) return setErr('Payment date cannot be in the future.');
 		try {
 			await save({ data: { purchase_receipt: pr.name, amount: amt, payment_date: date || null, remark } });
 			toast.success('Payment recorded');
@@ -51,7 +53,7 @@ export function RecordPaymentModal({ pr, onClose, onSaved }: { pr: PayableReceip
 					<input className="inp mono" value={amount} inputMode="decimal" onChange={(e) => setAmount(e.target.value)} />
 				</Field>
 				<Field label="Payment date">
-					<input className="inp mono" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+					<input className="inp mono" type="date" max={today} value={date} onChange={(e) => setDate(e.target.value)} />
 				</Field>
 				<div className="span2">
 					<Field label="Remark">

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
+	useFrappeAuth,
 	useFrappeGetCall,
 	useFrappePostCall,
 	useFrappeFileUpload,
@@ -37,6 +38,7 @@ export function NewMaterialRequest() {
 	const { id } = useParams();
 	const navigate = useNavigate();
 	const toast = useToast();
+	const { currentUser } = useFrappeAuth();
 	const isEdit = !!id;
 
 	const ctxRes = useFrappeGetCall<{ message: MrContext }>(API.mrContext, {});
@@ -51,7 +53,12 @@ export function NewMaterialRequest() {
 	// Editable only as a brand-new request or while still a Draft. Once it's been
 	// sent for approval (Pending Approval / Rejected / Approved) the form is locked
 	// and the workflow actions take over (mirrors the PO page).
-	const editable = isEdit ? !!detail && detail.docstatus === 0 && detail.workflow_state === 'Draft' : true;
+	// Editable (and therefore the "Submit for approval" button) only as a brand-new
+	// request or while it's still YOUR OWN Draft. An approver opening someone else's
+	// request must never see Save/Submit — they only Approve/Reject (or Reopen).
+	const editable = isEdit
+		? !!detail && detail.docstatus === 0 && detail.workflow_state === 'Draft' && detail.owner === currentUser
+		: true;
 	const readOnly = !editable;
 
 	const [category, setCategory] = useState('');
@@ -447,32 +454,44 @@ export function NewMaterialRequest() {
 										<div className="t1">{l.item_name}</div>
 										{l.item_code !== l.item_name && <div className="t2">{l.item_code}</div>}
 									</div>
-									<span>
-										{l.sub_category ? (
-											<span className="subpill">{l.sub_category}</span>
+									<div className="lf">
+										<span className="lfl">Sub-category</span>
+										<span>
+											{l.sub_category ? (
+												<span className="subpill">{l.sub_category}</span>
+											) : (
+												<span className="nosub">No sub-category</span>
+											)}
+										</span>
+									</div>
+									<div className="lf">
+										<span className="lfl">Qty</span>
+										<input
+											className="inp mono"
+											value={l.qty}
+											disabled={readOnly}
+											inputMode="decimal"
+											onChange={(e) => setLine(i, { qty: e.target.value })}
+										/>
+									</div>
+									<div className="lf">
+										<span className="lfl">UOM</span>
+										{l.uoms.length > 1 ? (
+											<SelectInput value={l.uom} onChange={(v) => setLine(i, { uom: v })} disabled={readOnly} options={l.uoms.map((u) => ({ value: u.uom }))} />
 										) : (
-											<span className="nosub">No sub-category</span>
+											<input className="inp" value={l.uom} disabled />
 										)}
-									</span>
-									<input
-										className="inp mono"
-										value={l.qty}
-										disabled={readOnly}
-										inputMode="decimal"
-										onChange={(e) => setLine(i, { qty: e.target.value })}
-									/>
-									{l.uoms.length > 1 ? (
-										<SelectInput value={l.uom} onChange={(v) => setLine(i, { uom: v })} disabled={readOnly} options={l.uoms.map((u) => ({ value: u.uom }))} />
-									) : (
-										<input className="inp" value={l.uom} disabled />
-									)}
-									<input
-										className="inp mono"
-										type="date"
-										value={l.schedule_date}
-										disabled={readOnly}
-										onChange={(e) => setLine(i, { schedule_date: e.target.value })}
-									/>
+									</div>
+									<div className="lf">
+										<span className="lfl">Required by</span>
+										<input
+											className="inp mono"
+											type="date"
+											value={l.schedule_date}
+											disabled={readOnly}
+											onChange={(e) => setLine(i, { schedule_date: e.target.value })}
+										/>
+									</div>
 									{!readOnly ? (
 										<button className="xbtn" onClick={() => removeLine(i)} aria-label="Remove item">
 											<Icon name="close" size={13} />

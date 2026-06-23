@@ -30,6 +30,7 @@ interface Line {
 	uom: string;
 	uoms: { uom: string; conversion_factor: number }[];
 	sub_category: string | null;
+	category: string | null;
 	qty: string;
 	rate: string;
 	gst: string;
@@ -87,6 +88,7 @@ export function NewPurchaseOrder() {
 	const [project, setProject] = useState('');
 	const [category, setCategory] = useState('');
 	const [taxType, setTaxType] = useState('');
+	const [orderDate, setOrderDate] = useState('');
 	const [requiredBy, setRequiredBy] = useState('');
 	const [remark, setRemark] = useState('');
 	const [lines, setLines] = useState<Line[]>([]);
@@ -100,8 +102,11 @@ export function NewPurchaseOrder() {
 	const [mrPulled, setMrPulled] = useState(false);
 
 	useEffect(() => {
-		if (!isEdit && ctx && !requiredBy) setRequiredBy(ctx.today);
-	}, [ctx, isEdit, requiredBy]);
+		if (!isEdit && ctx) {
+			if (!requiredBy) setRequiredBy(ctx.today);
+			if (!orderDate) setOrderDate(ctx.today);
+		}
+	}, [ctx, isEdit, requiredBy, orderDate]);
 
 	useEffect(() => {
 		if (!isEdit && mrParam && !mrPulled) {
@@ -117,6 +122,7 @@ export function NewPurchaseOrder() {
 			setProject(detail.project ?? '');
 			setCategory(detail.category ?? '');
 			setTaxType(detail.tax_type ?? '');
+			setOrderDate(detail.transaction_date ?? '');
 			setRequiredBy(detail.schedule_date ?? '');
 			setRemark(detail.remark ?? '');
 			setLines(
@@ -126,6 +132,7 @@ export function NewPurchaseOrder() {
 					uom: it.uom,
 					uoms: it.uoms ?? [{ uom: it.uom, conversion_factor: 1 }],
 					sub_category: it.sub_category,
+					category: it.category,
 					qty: String(it.qty ?? ''),
 					rate: String(it.rate ?? ''),
 					gst: it.gst_percent != null ? String(it.gst_percent) : '',
@@ -176,7 +183,7 @@ export function NewPurchaseOrder() {
 		if (v === NONE) setLines((ls) => ls.map((l) => ({ ...l, gst: '', rwt: l.rate })));
 	}
 
-	async function appendItems(rows: { item_code: string; item_name: string; uom: string; uoms?: { uom: string; conversion_factor: number }[]; sub_category: string | null; qty?: number; specification?: string | null; remark?: string | null; material_request?: string | null; material_request_item?: string | null }[]) {
+	async function appendItems(rows: { item_code: string; item_name: string; uom: string; uoms?: { uom: string; conversion_factor: number }[]; sub_category: string | null; category?: string | null; qty?: number; specification?: string | null; remark?: string | null; material_request?: string | null; material_request_item?: string | null }[]) {
 		const fresh = rows.filter((r) => !lines.some((l) => l.item_code === r.item_code));
 		const built: Line[] = fresh.map((r) => ({
 			item_code: r.item_code,
@@ -184,6 +191,7 @@ export function NewPurchaseOrder() {
 			uom: r.uom,
 			uoms: r.uoms ?? [{ uom: r.uom, conversion_factor: 1 }],
 			sub_category: r.sub_category,
+			category: r.category ?? null,
 			qty: r.qty != null ? String(r.qty) : '',
 			rate: '',
 			gst: '',
@@ -217,7 +225,7 @@ export function NewPurchaseOrder() {
 	function addByCategory(code: string) {
 		const opt = (itemsRes.data?.message ?? []).find((o) => o.value === code);
 		if (!opt) return;
-		void appendItems([{ item_code: opt.value, item_name: opt.label, uom: opt.uom, uoms: opt.uoms, sub_category: opt.sub_category }]);
+		void appendItems([{ item_code: opt.value, item_name: opt.label, uom: opt.uom, uoms: opt.uoms, sub_category: opt.sub_category, category }]);
 	}
 
 	async function pullFromMr(mrName: string) {
@@ -236,7 +244,7 @@ export function NewPurchaseOrder() {
 			}
 			if (msg.category) setCategory(msg.category);
 			if (msg.project) setProject(msg.project);
-			await appendItems(msg.items);
+			await appendItems(msg.items.map((it) => ({ ...it, category: msg.category })));
 		} catch (e) {
 			setErr(parseServerError(e));
 		}
@@ -283,6 +291,15 @@ export function NewPurchaseOrder() {
 		return fromLines.length ? fromLines : detail?.material_requests ?? [];
 	}, [lines, detail]);
 	const fromMr = sourceMrs.length > 0;
+	// Distinct categories represented by the lines. A PO is normally one category,
+	// but when built from multiple MRs of different categories we surface all of
+	// them in the form (custom_category holds a single value, so a multi-category
+	// PO stores none rather than a misleading single category).
+	const lineCats = useMemo(
+		() => Array.from(new Set(lines.map((l) => l.category).filter(Boolean))) as string[],
+		[lines],
+	);
+	const multiCat = lineCats.length > 1;
 	// MR picker: drop already-added MRs, and once a project is locked (from the
 	// first MR) show only that project's requests — a PO can't mix projects.
 	const mrPickerOptions = useMemo(
@@ -317,8 +334,9 @@ export function NewPurchaseOrder() {
 				name: id ?? null,
 				supplier,
 				project: project || null,
-				category: category || null,
+				category: lineCats.length === 1 ? lineCats[0] : multiCat ? null : category || null,
 				tax_type: taxType || null,
+				transaction_date: orderDate || null,
 				schedule_date: requiredBy || null,
 				remark,
 				submit_for_approval: strict,
@@ -526,7 +544,14 @@ export function NewPurchaseOrder() {
 						<Field label="Company">
 							<input className="inp" disabled value={companyName || '—'} />
 						</Field>
-						<Field label="Category">
+						<Field label={multiCat ? 'Categories' : 'Category'} hint={multiCat ? 'This order spans multiple categories from the selected requests.' : undefined}>
+							{multiCat ? (
+								<div className="sochips" style={{ marginTop: 0 }}>
+									{lineCats.map((c) => (
+										<span key={c} className="sochip">{c}</span>
+									))}
+								</div>
+							) : (
 							<SelectInput
 								value={category}
 								onChange={(v) => {
@@ -538,6 +563,7 @@ export function NewPurchaseOrder() {
 								placeholder="Select category…"
 								options={(ctx?.categories ?? []).map((c) => ({ value: c }))}
 							/>
+							)}
 						</Field>
 						<Field
 							label="Tax type"
@@ -552,12 +578,23 @@ export function NewPurchaseOrder() {
 								options={(ctx?.tax_types ?? [INTRA, INTER, NONE]).map((t) => ({ value: t }))}
 							/>
 						</Field>
+						<Field label="Order date" hint="Back-date the order if needed.">
+							<input
+								className="inp mono"
+								type="date"
+								value={orderDate}
+								disabled={readOnly}
+								max={requiredBy || undefined}
+								onChange={(e) => setOrderDate(e.target.value)}
+							/>
+						</Field>
 						<Field label="Required by">
 							<input
 								className="inp mono"
 								type="date"
 								value={requiredBy}
 								disabled={readOnly}
+								min={orderDate || undefined}
 								onChange={(e) => setRequiredBy(e.target.value)}
 							/>
 						</Field>
@@ -620,16 +657,34 @@ export function NewPurchaseOrder() {
 										{l.material_request && <span className="t2" style={{ color: 'var(--fg-4)' }} title={l.material_request}>· MR</span>}
 									</div>
 								</div>
-								<input className="inp mono" value={l.qty} disabled={readOnly} inputMode="decimal" onChange={(e) => setLineCalc(i, 'qty', e.target.value)} />
-								{l.uoms.length > 1 ? (
-									<SelectInput value={l.uom} onChange={(v) => setLine(i, { uom: v })} disabled={readOnly} options={l.uoms.map((u) => ({ value: u.uom }))} />
-								) : (
-									<input className="inp" value={l.uom} disabled />
-								)}
-								<input className="inp mono" value={l.rate} disabled={readOnly} inputMode="decimal" placeholder="0.00" onChange={(e) => setLineCalc(i, 'rate', e.target.value)} />
-								<input className="inp mono" value={isNoGst ? '' : l.gst} disabled={readOnly || isNoGst} inputMode="decimal" placeholder="0" onChange={(e) => setLineCalc(i, 'gst', e.target.value)} />
-								<input className="inp mono" value={isNoGst ? l.rate : l.rwt} disabled={readOnly || isNoGst} inputMode="decimal" placeholder="0.00" onChange={(e) => setLineCalc(i, 'rwt', e.target.value)} />
-								<span className="amt">{fmtMoney(num(l.qty) * num(l.rate), 'INR')}</span>
+								<div className="lf">
+									<span className="lfl">Qty</span>
+									<input className="inp mono" value={l.qty} disabled={readOnly} inputMode="decimal" onChange={(e) => setLineCalc(i, 'qty', e.target.value)} />
+								</div>
+								<div className="lf">
+									<span className="lfl">UOM</span>
+									{l.uoms.length > 1 ? (
+										<SelectInput value={l.uom} onChange={(v) => setLine(i, { uom: v })} disabled={readOnly} options={l.uoms.map((u) => ({ value: u.uom }))} />
+									) : (
+										<input className="inp" value={l.uom} disabled />
+									)}
+								</div>
+								<div className="lf">
+									<span className="lfl">Rate (w/o tax)</span>
+									<input className="inp mono" value={l.rate} disabled={readOnly} inputMode="decimal" placeholder="0.00" onChange={(e) => setLineCalc(i, 'rate', e.target.value)} />
+								</div>
+								<div className="lf">
+									<span className="lfl">GST %</span>
+									<input className="inp mono" value={isNoGst ? '' : l.gst} disabled={readOnly || isNoGst} inputMode="decimal" placeholder="0" onChange={(e) => setLineCalc(i, 'gst', e.target.value)} />
+								</div>
+								<div className="lf">
+									<span className="lfl">Rate (w/ tax)</span>
+									<input className="inp mono" value={isNoGst ? l.rate : l.rwt} disabled={readOnly || isNoGst} inputMode="decimal" placeholder="0.00" onChange={(e) => setLineCalc(i, 'rwt', e.target.value)} />
+								</div>
+								<div className="lf">
+									<span className="lfl">Amount</span>
+									<span className="amt">{fmtMoney(num(l.qty) * num(l.rate), 'INR')}</span>
+								</div>
 								{!readOnly ? (
 									<button className="xbtn" onClick={() => removeLine(i)} aria-label="Remove">
 										<Icon name="close" size={13} />

@@ -1,0 +1,203 @@
+/* ============================================================
+   ProcureFlow — phone tier (Goal 1: make the SPA good on mobile)
+   Loaded LAST so its <=700px rules win the cascade. Everything here
+   is additive: desktop/tablet (>700px) is untouched. The existing
+   app.css 1020px block keeps the tablet (700–1020px) layout.
+   ============================================================ */
+
+/* Mobile chrome is rendered by AppShell but hidden on larger screens. */
+.mtopbar,
+.mbottomnav,
+.msheet-overlay {
+	display: none;
+}
+
+/* Per-field labels for stacked item lines. On desktop the .lf wrapper
+   collapses with display:contents so the original grid is unchanged and
+   the label is hidden; on phones (below) it becomes a label-over-field. */
+.lf { display: contents; }
+.lfl { display: none; }
+
+@media (max-width: 700px) {
+	/* avoid iOS/Android auto text inflation on rotate */
+	html { -webkit-text-size-adjust: 100%; }
+
+	/* ---- Shell: drop the rail, switch to top bar + bottom tabs ---- */
+	.layout { display: block; min-height: 100dvh; }
+	.sidebar, .sidebar.collapsed { display: none; }
+	.content { min-height: 100dvh; }
+
+	.mtopbar {
+		display: flex; align-items: center; gap: 10px;
+		position: sticky; top: 0; z-index: 55;
+		height: 52px; padding: 0 14px;
+		padding-top: env(safe-area-inset-top);
+		background: var(--hdr-bg);
+		backdrop-filter: blur(14px) saturate(1.4); -webkit-backdrop-filter: blur(14px) saturate(1.4);
+		border-bottom: 1px solid var(--hairline);
+	}
+	.mtopbar .mlogo { max-height: 30px; max-width: 120px; width: auto; border-radius: 4px; }
+	.mtopbar .mtitle { font-weight: 600; font-size: 15px; letter-spacing: -.02em; }
+	.mtopbar .mtitle em { font-style: normal; background: var(--brand-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+	.mtopbar .spacer { flex: 1; }
+
+	/* ---- Page scaffold: tighter padding, room for the bottom bar ---- */
+	main, main.tight {
+		padding: 16px 14px calc(74px + env(safe-area-inset-bottom));
+		max-width: 100%;
+	}
+	h1, .titlebar h1, .titlebar .who { font-size: 21px; }
+	.titlebar { gap: 10px; }
+
+	/* ---- Bottom tab bar ---- */
+	.mbottomnav {
+		display: flex; align-items: stretch; justify-content: space-around;
+		position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+		padding-bottom: env(safe-area-inset-bottom);
+		background: var(--hdr-bg);
+		backdrop-filter: blur(14px) saturate(1.4); -webkit-backdrop-filter: blur(14px) saturate(1.4);
+		border-top: 1px solid var(--hairline);
+	}
+	.mbottomnav .mtab {
+		flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+		min-height: 56px; padding: 7px 2px 6px;
+		border: 0; background: none; cursor: pointer;
+		color: var(--fg-3); text-decoration: none; font-family: var(--font-ui);
+		transition: color .15s var(--ease);
+	}
+	.mbottomnav .mtab .mtl { font-size: 10.5px; font-weight: 500; letter-spacing: .01em; }
+	.mbottomnav .mtab svg { color: var(--fg-3); transition: color .15s var(--ease); }
+	.mbottomnav .mtab.on, .mbottomnav .mtab.on svg { color: var(--iris); }
+
+	/* ---- "More" bottom sheet ---- */
+	.msheet-overlay {
+		display: block; position: fixed; inset: 0; z-index: 90;
+		background: rgba(10, 13, 19, .45);
+		backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+	}
+	.msheet {
+		position: fixed; left: 0; right: 0; bottom: 0;
+		background: var(--card-bg); border-top: 1px solid var(--hairline);
+		border-radius: 18px 18px 0 0; box-shadow: var(--shadow-pop), var(--inset-hi);
+		padding: 8px 12px calc(12px + env(safe-area-inset-bottom));
+		animation: sheetUp .28s var(--spring) both;
+	}
+	.msheet-grab { width: 38px; height: 4px; border-radius: 2px; background: var(--hairline-2); margin: 6px auto 10px; }
+	.msheet-list { display: flex; flex-direction: column; gap: 2px; }
+	.msheet-list a {
+		display: flex; align-items: center; gap: 12px;
+		min-height: 48px; padding: 10px 12px; border-radius: 12px;
+		font-size: 14.5px; font-weight: 500; color: var(--fg-1); text-decoration: none;
+	}
+	.msheet-list a svg { color: var(--fg-3); }
+	.msheet-list a.on { color: var(--iris); background: var(--iris-tint); }
+	.msheet-list a.on svg { color: var(--iris); }
+	.msheet-list a:active { background: var(--row-hover); }
+	.msheet-foot { display: flex; align-items: center; gap: 12px; padding: 12px 12px 4px; border-top: 1px solid var(--hairline); margin-top: 6px; }
+	.msheet-logout { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 14px; border: 1px solid var(--hairline-2); border-radius: 12px; background: var(--surface-1); color: var(--err); font-family: var(--font-ui); font-size: 14px; font-weight: 600; cursor: pointer; }
+	.msheet-logout svg { color: var(--err); }
+	.msheet-user { font-size: 12px; color: var(--fg-3); word-break: break-all; margin-left: auto; text-align: right; }
+	@keyframes sheetUp { from { transform: translateY(100%); } to { transform: none; } }
+
+	/* ---- Layout grids collapse ---- */
+	.grid, .grid.detail { grid-template-columns: 1fr; }
+	.kpis { grid-template-columns: 1fr 1fr; gap: 10px; }
+
+	/* ---- Forms: single column, bigger touch targets ---- */
+	.formgrid { grid-template-columns: 1fr; padding: 14px; }
+	.formgrid .span2 { grid-column: auto; }
+	.field .inp:not(.area) { height: 46px; }
+	select.inp { background-position: calc(100% - 18px) 21px, calc(100% - 13px) 21px; }
+	.checkrow { height: auto; min-height: 44px; }
+	.btn { min-height: 44px; padding: 11px 18px; }
+	.icbtn { width: 42px; height: 42px; }
+	.formfoot { flex-wrap: wrap; padding: 14px; }
+
+	/* ---- Item-line grids -> labelled vertical cards ----
+	   Each field is wrapped in .lf, which here becomes a label-over-field.
+	   !important beats the inline gridTemplateColumns on the Receipt's
+	   reused .mrtop so it stacks too. ---- */
+	.mrhead, .pohead, .reqhead { display: none; }
+	.mrtop, .potop, .reqrow { grid-template-columns: 1fr !important; gap: 12px; }
+	.mrtop .ix, .potop .ix { display: none; }
+	.mrbot, .pobot { grid-template-columns: 1fr; padding-left: 0; gap: 12px; margin-top: 12px; }
+	.mrline, .poline {
+		border: 1px solid var(--hairline); border-radius: 13px;
+		margin: 0 0 11px; padding: 14px; background: var(--surface-1);
+	}
+	.mrline:hover, .poline:hover { background: var(--surface-1); }
+	.lf { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+	.lfl {
+		display: block; font-size: 10px; font-weight: 600;
+		letter-spacing: .06em; text-transform: uppercase; color: var(--fg-4);
+	}
+	.mrline .inp, .poline .inp { height: 42px; font-size: 14px; }
+	.poline .amt { text-align: left; font-size: 14px; color: var(--fg-1); }
+	.mrtop .xbtn, .potop .xbtn { justify-self: end; width: 42px; height: 42px; }
+
+	/* ---- List toolbar (DataTable chead): wrap, full-width search ---- */
+	.chead { flex-wrap: wrap; row-gap: 8px; }
+	.chead .searchbox { width: 100%; }
+	.chead .searchbox .inp { width: 100%; }
+	.filterbar { padding: 12px 14px; gap: 10px; }
+	.filterbar .fb-item { flex: 1 1 140px; }
+	.fb-sel { min-width: 0; width: 100%; }
+	.fb-range { width: 100%; }
+	.fb-date { flex: 1; width: auto; }
+
+	/* ============ DataTable -> stacked cards ============
+	   Each row becomes a bordered card; the column header is shown per
+	   cell via data-label (plumbed in DataTable.tsx). */
+	.tablescroll { max-height: none; overflow: visible; }
+	.tablescroll table, .tablescroll thead, .tablescroll tbody,
+	.tablescroll th, .tablescroll td, .tablescroll tr { display: block; }
+	/* visually hide the real header row (kept for a11y) */
+	.tablescroll thead { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+	.tablescroll tbody tr {
+		border: 1px solid var(--hairline); border-radius: 13px; overflow: hidden;
+		margin: 0 0 11px; background: var(--surface-1);
+	}
+	.tablescroll tbody tr:hover { transform: none; background: var(--surface-1); }
+	.tablescroll td {
+		display: flex; align-items: center; justify-content: space-between; gap: 14px;
+		padding: 10px 14px; border-bottom: 1px solid var(--hairline);
+		text-align: right !important; white-space: normal;
+	}
+	.tablescroll tr td:last-child { border-bottom: 0; }
+	.tablescroll td:empty { display: none; }
+	.tablescroll td::before {
+		content: attr(data-label);
+		flex: none; text-align: left;
+		font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+		color: var(--fg-3);
+	}
+	/* a cell with no label reads as a full-width header line (usually the ID) */
+	.tablescroll td:not([data-label]), .tablescroll td[data-label=''] { justify-content: flex-start; text-align: left !important; }
+	.tablescroll td:not([data-label])::before, .tablescroll td[data-label='']::before { content: none; }
+
+	/* ============ Modal -> bottom sheet ============ */
+	.overlay { place-items: end center; padding: 0; }
+	.modal {
+		width: 100%; max-width: 100%; max-height: 90vh;
+		border-radius: 18px 18px 0 0;
+		animation: sheetUp .28s var(--spring) both;
+		padding-bottom: env(safe-area-inset-bottom);
+	}
+
+	/* ============ SearchSelect dropdown -> bottom sheet ============
+	   The dropdown is portaled with inline fixed coords; override to a
+	   full-width bottom sheet so it's reachable with a thumb. */
+	.sdrop {
+		position: fixed !important;
+		left: 8px !important; right: 8px !important; width: auto !important;
+		top: auto !important; bottom: calc(8px + env(safe-area-inset-bottom)) !important;
+		max-height: 56vh !important;
+		border-radius: 14px;
+	}
+	.sdrop .opt { padding: 12px 14px; }
+}
+
+/* Very small phones: KPIs single column. */
+@media (max-width: 430px) {
+	.kpis { grid-template-columns: 1fr; }
+}

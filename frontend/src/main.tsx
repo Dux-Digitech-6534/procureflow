@@ -8,6 +8,8 @@ import './styles/typography.css';
 import './styles/spacing.css';
 import './styles/app.css';
 import './styles/pages.css';
+import './styles/responsive.css';
+import './styles/mobile.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
 	<React.StrictMode>

@@ -270,9 +270,18 @@ export function NewReceipt() {
 									<div className="t1">{l.item_name}</div>
 									{l.item_code !== l.item_name && <div className="t2">{l.item_code}</div>}
 								</div>
-								<span className="mono" style={{ fontSize: 12.5, color: 'var(--fg-3)' }}>{l.ordered} {l.uom}</span>
-								<span className="mono" style={{ fontSize: 12.5, color: 'var(--fg-2)' }}>{l.pending}</span>
-								<input className="inp mono" value={l.qty} inputMode="decimal" onChange={(e) => setQty(i, e.target.value)} />
+								<div className="lf">
+									<span className="lfl">Ordered</span>
+									<span className="mono" style={{ fontSize: 12.5, color: 'var(--fg-3)' }}>{l.ordered} {l.uom}</span>
+								</div>
+								<div className="lf">
+									<span className="lfl">Pending</span>
+									<span className="mono" style={{ fontSize: 12.5, color: 'var(--fg-2)' }}>{l.pending}</span>
+								</div>
+								<div className="lf">
+									<span className="lfl">Receive</span>
+									<input className="inp mono" value={l.qty} inputMode="decimal" onChange={(e) => setQty(i, e.target.value)} />
+								</div>
 							</div>
 						</div>
 					))}

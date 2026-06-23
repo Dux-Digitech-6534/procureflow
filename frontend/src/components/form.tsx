@@ -127,6 +127,10 @@ export function SearchSelect({
 	const wrap = useRef<HTMLDivElement | null>(null);
 	const inputRef = useRef<HTMLInputElement | null>(null);
 	const drop = useRef<HTMLDivElement | null>(null);
+	const searchRef = useRef<HTMLInputElement | null>(null);
+	// Touch devices: the trigger is read-only and the in-dropdown search is NOT
+	// auto-focused, so tapping a picker never pops the soft keyboard.
+	const isTouch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
 
 	useEffect(() => {
 		function onDocClick(e: MouseEvent) {
@@ -171,6 +175,13 @@ export function SearchSelect({
 		};
 	}, [open]);
 
+	useEffect(() => {
+		if (open && !isTouch) {
+			const id = window.setTimeout(() => searchRef.current?.focus(), 0);
+			return () => window.clearTimeout(id);
+		}
+	}, [open, isTouch]);
+
 	function reopen() {
 		if (disabled) return;
 		setQuery('');
@@ -195,15 +206,12 @@ export function SearchSelect({
 			<input
 				ref={inputRef}
 				className="inp"
-				value={open ? query : (selected?.label ?? selected?.value ?? value ?? '')}
-				placeholder={placeholder ?? 'Search…'}
+				readOnly
+				value={selected?.label ?? selected?.value ?? value ?? ''}
+				placeholder={placeholder ?? 'Select…'}
 				disabled={disabled}
 				onFocus={reopen}
 				onClick={reopen}
-				onChange={(e) => {
-					setQuery(e.target.value);
-					if (!open) setOpen(true);
-				}}
 			/>
 			{value && !disabled && (
 				<button
@@ -238,6 +246,13 @@ export function SearchSelect({
 							} as CSSProperties
 						}
 					>
+						<input
+							ref={searchRef}
+							className="inp sdrop-search"
+							value={query}
+							placeholder="Type to search…"
+							onChange={(e) => setQuery(e.target.value)}
+						/>
 						{filtered.length === 0 && <div className="opt mut">No matches</div>}
 						{filtered.map((o) => (
 							<div

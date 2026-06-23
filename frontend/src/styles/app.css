@@ -427,10 +427,14 @@ select.inp { appearance: none; -webkit-appearance: none; background-image: linea
 }
 .swrap .sclear:hover { color: var(--err) }
 .sdrop {
-	position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 70;
+	/* Above the modal overlay (z-index 100) so a SearchSelect dropdown opened
+	   inside a dialog renders in front of it, not behind. */
+	position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 200;
 	background: var(--surface-1); border: 1px solid var(--hairline); border-radius: 12px;
 	box-shadow: var(--shadow-pop), var(--inset-hi); max-height: 380px; min-width: 260px; overflow: auto;
 }
+.sdrop-search { position: sticky; top: 0; z-index: 2; height: 42px; border: 0; border-bottom: 1px solid var(--hairline); border-radius: 12px 12px 0 0; background: var(--surface-1) }
+.sdrop-search:focus { box-shadow: none; border-bottom-color: var(--iris) }
 .sdrop .opt { padding: 9px 13px; font-size: 13px; color: var(--fg-1); cursor: pointer; transition: background .18s var(--ease) }
 .sdrop .opt .lbl { font-weight: 500 }
 .sdrop .opt:hover { background: var(--row-hover) }
