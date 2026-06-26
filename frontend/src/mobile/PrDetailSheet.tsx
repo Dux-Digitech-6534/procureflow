@@ -1,6 +1,7 @@
 import { useFrappeGetCall } from 'frappe-react-sdk';
 import { API, payTone, type PrDetail } from '../lib/api';
 import { Icon } from '../components/Icon';
+import { Attachment } from '../components/Attachment';
 import { fmtDateLong, fmtMoney } from '../lib/format';
 import { RelatedDocs } from './RelatedDocs';
 import { useLang, tPay } from './i18n';
@@ -77,9 +78,7 @@ export function PrDetailSheet({ name, onClose }: { name: string; onClose: () => 
 									<div className="eyebrow2">{t('d.photos')}</div>
 									<div className="attach">
 										{photos.map((url) => (
-											<a key={url} href={url} target="_blank" rel="noopener noreferrer">
-												<img src={url} alt="Receipt photo" loading="lazy" />
-											</a>
+											<Attachment key={url} url={url} label="Receipt photo" />
 										))}
 									</div>
 								</>

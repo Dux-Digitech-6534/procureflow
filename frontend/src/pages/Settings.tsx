@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useFrappeCreateDoc, useFrappeGetCall, useFrappeGetDoc, useFrappeGetDocList, useFrappePostCall } from 'frappe-react-sdk';
-import { API } from '../lib/api';
+import { API, type AssignableRole, type Capabilities, type ManagedUser } from '../lib/api';
 import { Card, CHead, EmptyMsg, Modal } from '../components/ui';
-import { Field, SearchSelect, SelectInput, TextInput } from '../components/form';
+import { Field, SearchSelect, SelectInput, TextArea, TextInput } from '../components/form';
 import { Icon, type IconName } from '../components/Icon';
 import { useToast } from '../components/Toast';
-import { parseServerError } from '../lib/format';
+import { parseServerError, termsHtmlToText, termsTextToHtml } from '../lib/format';
+import { whatsAppCredsUrl } from '../lib/whatsapp';
 
 interface Row {
 	name: string;
@@ -571,10 +573,18 @@ function SupplierPanel({ canCreate }: { canCreate: boolean }) {
 
 /* ----------------------------------- Items ---------------------------------- */
 
-// New items default to this leaf item group; the field is hidden from the form
-// because Category + Sub-category are used for grouping. ("All Item Groups" is a
-// parent group and cannot be assigned to an item.)
-const DEFAULT_ITEM_GROUP = 'Raw Material';
+// Item GST is set via an Item Tax Template (the backend maps the chosen % to the
+// matching template); the item group default ('Products') is applied server-side
+// in save_item so the desk and React item-create paths can't diverge.
+const GST_OPTIONS = [
+	{ value: '5', label: '5%' },
+	{ value: '12', label: '12%' },
+	{ value: '18', label: '18%' },
+	{ value: '28', label: '28%' },
+];
+const TEMPLATE_RATE: Record<string, string> = {
+	'GST 5% - SG': '5', 'GST 12% - SG': '12', 'GST 18 % - SG': '18', 'GST 28% - SG': '28',
+};
 
 function ItemPanel({ canCreate }: { canCreate: boolean }) {
 	const { data, mutate } = useFrappeGetDocList<Row>('Item', {
@@ -666,19 +676,26 @@ function ItemModal({
 	onClose: () => void;
 	onSaved: () => void;
 }) {
-	const { commit, loading } = useMasterSave('Item');
+	const { call: saveItemCall, loading } = useFrappePostCall<{ message: string }>(API.saveItem);
 	const toast = useToast();
 	const [code, setCode] = useState(editRow ? editRow.name : '');
 	const [name, setName] = useState(editRow ? String(editRow.item_name ?? '') : '');
 	const [uom, setUom] = useState(editRow ? String(editRow.stock_uom ?? 'Nos') : 'Nos');
 	const [category, setCategory] = useState(editRow ? String(editRow.custom_category ?? '') : '');
 	const [subCat, setSubCat] = useState(editRow ? String(editRow.custom_sub_category ?? '') : '');
+	const [hsn, setHsn] = useState('');
+	const [gst, setGst] = useState('');
 	const [altUoms, setAltUoms] = useState<AltUom[]>([]);
 	const [uomSeeded, setUomSeeded] = useState(false);
 	const [err, setErr] = useState('');
 
-	// On edit, pull the item's existing UOM conversions to prefill the editor.
-	const itemDoc = useFrappeGetDoc<{ stock_uom: string; uoms: { uom: string; conversion_factor: number }[] }>('Item', editRow?.name);
+	// On edit, pull the item's existing UOM conversions + HSN + GST to prefill.
+	const itemDoc = useFrappeGetDoc<{
+		stock_uom: string;
+		uoms: { uom: string; conversion_factor: number }[];
+		custom_hsn_code?: string;
+		taxes?: { item_tax_template: string }[];
+	}>('Item', editRow?.name);
 	useEffect(() => {
 		if (editRow && itemDoc.data && !uomSeeded) {
 			const su = itemDoc.data.stock_uom;
@@ -687,6 +704,8 @@ function ItemModal({
 					.filter((u) => u.uom && u.uom !== su)
 					.map((u) => ({ uom: u.uom, cf: String(u.conversion_factor) })),
 			);
+			setHsn(itemDoc.data.custom_hsn_code ?? '');
+			setGst(TEMPLATE_RATE[itemDoc.data.taxes?.[0]?.item_tax_template ?? ''] ?? '');
 			setUomSeeded(true);
 		}
 	}, [editRow, itemDoc.data, uomSeeded]);
@@ -716,20 +735,20 @@ function ItemModal({
 		// uoms table: stock UOM (factor 1) + the alternates.
 		const uomsPayload = [{ uom, conversion_factor: 1 }, ...alts.map((a) => ({ uom: a.uom, conversion_factor: a.cf }))];
 		try {
-			const secondary: Record<string, unknown> = {
-				item_name: name.trim() || code.trim(),
-				stock_uom: uom,
-				custom_category: category || null,
-				custom_sub_category: subCat || null,
-				uoms: uomsPayload,
-			};
-			// Item code is the identity (and PK) — read-only on edit; on create we
-			// also stamp the default item group.
-			if (editRow) {
-				await commit(editRow, 'item_code', code, secondary, false);
-			} else {
-				await commit(null, 'item_code', code, { ...secondary, item_group: DEFAULT_ITEM_GROUP }, false);
-			}
+			// One backend path (save_item) for create + edit — keyed on item_code —
+			// so the correct flags / item group / HSN / GST always apply.
+			await saveItemCall({
+				data: {
+					item_code: code.trim(),
+					item_name: name.trim() || code.trim(),
+					stock_uom: uom,
+					custom_category: category || null,
+					custom_sub_category: subCat || null,
+					hsn: hsn.trim() || null,
+					gst: gst === '' ? null : Number(gst),
+					uoms: uomsPayload,
+				},
+			});
 			toast.success(editRow ? 'Item updated' : 'Item created');
 			onSaved();
 		} catch (e) {
@@ -763,6 +782,12 @@ function ItemModal({
 						<SearchSelect value={subCat} onChange={setSubCat} options={subOptions} placeholder="Select sub-category…" />
 					</Field>
 				</div>
+				<Field label="HSN code" hint="Shown on the PO / print">
+					<TextInput value={hsn} onChange={setHsn} placeholder="e.g. 2523" />
+				</Field>
+				<Field label="GST %" hint="Sets the item's tax template">
+					<SearchSelect value={gst} onChange={setGst} options={GST_OPTIONS} placeholder="No GST (0%)" />
+				</Field>
 				<div className="span2">
 					<Field label="Additional units" hint="Optional — let this item be ordered/received in other units too.">
 						<div className="uomlist">
@@ -799,7 +824,320 @@ function ItemModal({
 	);
 }
 
+/* --------------------------- PO Terms & Conditions -------------------------- */
+
+// The default Terms printed on every PO. Stored as a "Terms and Conditions"
+// master (Default PO Terms) but edited here as plain text — one point per line.
+// Each new PO is prefilled with this; a PO can still override its own terms.
+function PoTermsPanel() {
+	const { data, mutate, isLoading } = useFrappeGetCall<{ message: { terms: string; can_edit: boolean } }>(API.getPoTerms, {});
+	const { call: saveCall, loading } = useFrappePostCall<{ message: { terms: string } }>(API.savePoTerms);
+	const toast = useToast();
+	const canEdit = data?.message?.can_edit ?? false;
+	const [text, setText] = useState('');
+	const [seeded, setSeeded] = useState(false);
+	const [err, setErr] = useState('');
+
+	useEffect(() => {
+		if (data?.message && !seeded) {
+			setText(termsHtmlToText(data.message.terms || ''));
+			setSeeded(true);
+		}
+	}, [data, seeded]);
+
+	async function save() {
+		setErr('');
+		try {
+			const r = await saveCall({ terms: termsTextToHtml(text) });
+			setText(termsHtmlToText(r.message.terms || ''));
+			toast.success('PO terms updated');
+			mutate();
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
+	return (
+		<Card>
+			<CHead icon="file-text" title="PO Terms &amp; Conditions" action={canEdit ? undefined : <span className="dim" style={{ fontSize: 11.5 }}>read-only</span>} />
+			<div style={{ padding: '2px 2px 4px' }}>
+				<div className="sub" style={{ margin: '0 0 12px' }}>
+					The Terms &amp; Conditions printed at the bottom of every purchase order — one point per line.
+					Each new PO is prefilled with this, and you can still tweak the terms on an individual order.
+				</div>
+				<TextArea value={text} onChange={setText} rows={7} disabled={!canEdit || isLoading} placeholder="One term per line…" />
+				{canEdit && (
+					<div className="formfoot" style={{ marginTop: 12 }}>
+						{err && <span className="ferr">{err}</span>}
+						<span className="spacer" />
+						<button className="btn primary" disabled={loading} onClick={() => void save()}>
+							{loading ? 'Saving…' : 'Save terms'}
+						</button>
+					</div>
+				)}
+			</div>
+		</Card>
+	);
+}
+
 /* --------------------------------- Settings --------------------------------- */
+
+/* ------------------------------ Users & Roles ------------------------------- */
+
+/** Multi-select role picker — a user can hold any number of roles. */
+function RoleChips({ all, selected, onToggle }: { all: AssignableRole[]; selected: string[]; onToggle: (role: string) => void }) {
+	return (
+		<div className="rolegrid">
+			{all.map((r) => {
+				const on = selected.includes(r.role);
+				return (
+					<button type="button" key={r.role} className={on ? 'rolechip on' : 'rolechip'} onClick={() => onToggle(r.role)}>
+						<span className="rc-check">{on ? <Icon name="check" size={12} /> : null}</span>
+						<span className="rc-body">
+							<span className="rc-label">{r.label}</span>
+							<span className="rc-desc">{r.description}</span>
+						</span>
+					</button>
+				);
+			})}
+		</div>
+	);
+}
+
+function UserModal({ roles, edit, emailConfigured, onClose, onSaved }: { roles: AssignableRole[]; edit: ManagedUser | null; emailConfigured: boolean; onClose: () => void; onSaved: () => void }) {
+	const toast = useToast();
+	const { call: createUser, loading: creating } = useFrappePostCall<{ message: { name: string } }>(API.createUser);
+	const { call: updateUser, loading: updating } = useFrappePostCall<{ message: { name: string } }>(API.updateUser);
+	const { call: resetPwCall, loading: resetting } = useFrappePostCall<{ message: unknown }>(API.resetUserPassword);
+	const isEdit = !!edit;
+	const [fullName, setFullName] = useState(edit?.full_name ?? '');
+	const [email, setEmail] = useState(edit?.email ?? '');
+	const [mobile, setMobile] = useState(edit?.mobile_no ?? '');
+	const [sel, setSel] = useState<string[]>(edit?.roles ?? []);
+	const [enabled, setEnabled] = useState(edit ? edit.enabled === 1 : true);
+	const [pwMode, setPwMode] = useState<'password' | 'email'>('password');
+	const [password, setPassword] = useState('');
+	const [resetPw, setResetPw] = useState('');
+	const [done, setDone] = useState<{ email: string; mobile: string; password: string } | null>(null);
+	const [err, setErr] = useState('');
+	const toggle = (role: string) => setSel((s) => (s.includes(role) ? s.filter((x) => x !== role) : [...s, role]));
+
+	async function save() {
+		setErr('');
+		try {
+			if (isEdit) {
+				await updateUser({ data: { user: edit!.name, mobile_no: mobile.trim(), roles: sel, enabled } });
+				toast.success('User updated');
+				onSaved();
+				onClose();
+			} else {
+				if (!fullName.trim()) return setErr('Enter the user’s name.');
+				if (!email.trim()) return setErr('Enter an email address.');
+				const wantEmail = pwMode === 'email' && emailConfigured;
+				if (!wantEmail && !password.trim()) return setErr('Enter a temporary password.');
+				await createUser({
+					data: {
+						full_name: fullName.trim(),
+						email: email.trim(),
+						mobile_no: mobile.trim(),
+						roles: sel,
+						send_welcome_email: wantEmail,
+						password: wantEmail ? undefined : password,
+					},
+				});
+				toast.success('User created');
+				onSaved();
+				if (wantEmail) onClose();
+				else setDone({ email: email.trim(), mobile: mobile.trim(), password });
+			}
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
+	async function doReset(viaEmail: boolean) {
+		setErr('');
+		try {
+			if (viaEmail) {
+				await resetPwCall({ data: { user: edit!.name, send_email: true } });
+				toast.success('Reset link emailed');
+				onClose();
+			} else {
+				if (!resetPw.trim()) return setErr('Enter a new temporary password.');
+				await resetPwCall({ data: { user: edit!.name, password: resetPw.trim() } });
+				toast.success('Password reset');
+				setDone({ email: edit!.email ?? edit!.name, mobile: mobile.trim(), password: resetPw.trim() });
+			}
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
+	// Success view: show the credentials + a WhatsApp share (after create / reset).
+	if (done) {
+		return (
+			<Modal title="Share login" icon="user" onClose={onClose}>
+				<div className="credbox">
+					<div><span className="ck">Login</span><span className="cv">{done.email}</span></div>
+					<div><span className="ck">Temp password</span><span className="cv mono">{done.password}</span></div>
+				</div>
+				<div className="dim" style={{ fontSize: 11.5, margin: '8px 2px 0' }}>Ask them to change it after the first login.</div>
+				<div className="formfoot">
+					<span className="spacer" />
+					<button className="btn" onClick={onClose}>Done</button>
+					{done.mobile ? (
+						<a className="btn primary" href={whatsAppCredsUrl(done)} target="_blank" rel="noopener noreferrer">
+							<Icon name="whatsapp" size={15} /> Send on WhatsApp
+						</a>
+					) : (
+						<a className="btn primary" href={whatsAppCredsUrl(done)} target="_blank" rel="noopener noreferrer" title="No mobile on file — pick a contact in WhatsApp">
+							<Icon name="whatsapp" size={15} /> Share on WhatsApp
+						</a>
+					)}
+				</div>
+			</Modal>
+		);
+	}
+
+	const loading = creating || updating;
+	return (
+		<Modal title={isEdit ? 'Edit user' : 'New user'} icon="user" onClose={onClose}>
+			<div className="formgrid">
+				<Field label="Full name" required>
+					<TextInput value={fullName} onChange={setFullName} placeholder="e.g. Rishit Nagar" disabled={isEdit} />
+				</Field>
+				<Field label="Email (login)" required hint={isEdit ? 'Cannot be changed' : undefined}>
+					<TextInput value={email} onChange={setEmail} placeholder="name@example.com" disabled={isEdit} />
+				</Field>
+				<Field label="Mobile" hint="Used for site-receiver lookups & WhatsApp.">
+					<TextInput value={mobile} onChange={setMobile} placeholder="10-digit number" />
+				</Field>
+				{isEdit && (
+					<Field label="Status">
+						<SelectInput value={enabled ? '1' : '0'} onChange={(v) => setEnabled(v === '1')} options={[{ value: '1', label: 'Active' }, { value: '0', label: 'Disabled' }]} />
+					</Field>
+				)}
+				<div className="span2">
+					<Field label="Roles" hint="A user can have multiple roles — tap to toggle.">
+						<RoleChips all={roles} selected={sel} onToggle={toggle} />
+					</Field>
+				</div>
+				{!isEdit && (
+					<div className="span2">
+						<Field label="First login">
+							{emailConfigured ? (
+								<div className="pwmode">
+									<label><input type="radio" name="pwmode" checked={pwMode === 'password'} onChange={() => setPwMode('password')} /> Set a temporary password</label>
+									<label><input type="radio" name="pwmode" checked={pwMode === 'email'} onChange={() => setPwMode('email')} /> Email a set-password link</label>
+								</div>
+							) : null}
+							{(pwMode === 'password' || !emailConfigured) ? (
+								<TextInput value={password} onChange={setPassword} placeholder="Temporary password — you'll share it (e.g. on WhatsApp)" />
+							) : (
+								<div className="dim" style={{ fontSize: 11.5, marginTop: 4 }}>
+									We’ll email a link to set their own password. (The link expires in ~20 minutes; they can use “Forgot password” after.)
+								</div>
+							)}
+						</Field>
+					</div>
+				)}
+				{isEdit && (
+					<div className="span2">
+						<Field label="Reset password" hint="Set a new temporary password to share, then send it.">
+							<div style={{ display: 'flex', gap: 8 }}>
+								<TextInput value={resetPw} onChange={setResetPw} placeholder="New temporary password" />
+								<button className="btn" disabled={resetting || !resetPw.trim()} onClick={() => void doReset(false)}>
+									{resetting ? 'Resetting…' : 'Reset'}
+								</button>
+							</div>
+							{emailConfigured && (
+								<button className="btn" style={{ marginTop: 8 }} disabled={resetting} onClick={() => void doReset(true)}>
+									Email a reset link instead
+								</button>
+							)}
+						</Field>
+					</div>
+				)}
+			</div>
+			<div className="formfoot">
+				{err && <span className="ferr">{err}</span>}
+				<span className="spacer" />
+				<button className="btn" onClick={onClose}>Cancel</button>
+				<button className="btn primary" disabled={loading} onClick={() => void save()}>
+					{loading ? 'Saving…' : isEdit ? 'Save changes' : 'Create user'}
+				</button>
+			</div>
+		</Modal>
+	);
+}
+
+function UsersPanel() {
+	const usersRes = useFrappeGetCall<{ message: ManagedUser[] }>(API.usersList, {}, 'pf:users');
+	const rolesRes = useFrappeGetCall<{ message: AssignableRole[] }>(API.assignableRoles, {}, 'pf:assignable-roles');
+	const capsRes = useFrappeGetCall<{ message: Capabilities }>(API.capabilities, undefined, 'pf:caps');
+	const emailConfigured = !!capsRes.data?.message?.email_configured;
+	const users = usersRes.data?.message ?? [];
+	const roleDefs = rolesRes.data?.message ?? [];
+	const roleLabel = (r: string) => roleDefs.find((d) => d.role === r)?.label ?? r;
+	const [q, setQ] = useState('');
+	const [modal, setModal] = useState<{ edit: ManagedUser | null } | null>(null);
+	const shown = useMemo(() => {
+		const s = q.trim().toLowerCase();
+		if (!s) return users;
+		return users.filter((u) => [u.full_name, u.email, u.mobile_no, ...u.roles].some((v) => String(v ?? '').toLowerCase().includes(s)));
+	}, [users, q]);
+
+	const refresh = () => void usersRes.mutate();
+
+	return (
+		<Card>
+			<CHead
+				icon="user"
+				title="Users"
+				count={users.length}
+				action={<a href="#" onClick={(e) => { e.preventDefault(); setModal({ edit: null }); }}>New user</a>}
+			/>
+			{users.length === 0 ? (
+				<EmptyMsg title="No users yet" text="Add your first team member." />
+			) : (
+				<>
+					<SearchRow q={q} setQ={setQ} shown={shown.length} total={users.length} />
+					{shown.length === 0 ? (
+						<EmptyMsg title="No matches" text="Adjust your search." />
+					) : (
+						<div className="tablescroll">
+							<table className="clickable">
+								<thead>
+									<tr><th>Name</th><th>Email</th><th>Mobile</th><th>Roles</th><th>Status</th></tr>
+								</thead>
+								<tbody>
+									{shown.map((u) => (
+										<tr key={u.name} onClick={() => setModal({ edit: u })}>
+											<td className="c1">{u.full_name || u.name}{u.is_admin && <span className="dim" style={{ fontSize: 10.5, marginLeft: 6 }}>admin</span>}</td>
+											<td className="dim">{u.email}</td>
+											<td className="mono">{u.mobile_no || '—'}</td>
+											<td>{u.roles.length ? <span className="rolepills">{u.roles.map((r) => <span key={r} className="rolepill">{roleLabel(r)}</span>)}</span> : <span className="dim">—</span>}</td>
+											<td>{u.enabled ? <span className="rolepill ok">Active</span> : <span className="rolepill off">Disabled</span>}</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
+					)}
+				</>
+			)}
+			{modal && <UserModal roles={roleDefs} edit={modal.edit} emailConfigured={emailConfigured} onClose={() => setModal(null)} onSaved={refresh} />}
+		</Card>
+	);
+}
+
+const SETTINGS_TABS = [
+	{ key: 'catalog', label: 'Catalog' },
+	{ key: 'organization', label: 'Suppliers & Projects' },
+	{ key: 'documents', label: 'Documents' },
+	{ key: 'users', label: 'Users & Roles' },
+] as const;
+type SettingsTab = (typeof SETTINGS_TABS)[number]['key'];
 
 export function Settings() {
 	const { data, isLoading } = useFrappeGetCall<{ message: Record<string, boolean> }>(API.settingsCanCreate, {});
@@ -807,6 +1145,21 @@ export function Settings() {
 	// Fail safe: keep panels read-only until perms are known, so we never flash a
 	// "New" / edit affordance the user can't actually use.
 	const allow = (dt: string) => !isLoading && can[dt] === true;
+
+	const capsRes = useFrappeGetCall<{ message: Capabilities }>(API.capabilities, undefined, 'pf:caps');
+	const canManageUsers = !!capsRes.data?.message?.manage_users;
+	const tabs = SETTINGS_TABS.filter((t) => t.key !== 'users' || canManageUsers);
+
+	const [sp, setSp] = useSearchParams();
+	const urlTab = sp.get('tab') as SettingsTab | null;
+	const [tab, setTab] = useState<SettingsTab>(urlTab && SETTINGS_TABS.some((t) => t.key === urlTab) ? urlTab : 'catalog');
+	const activeTab: SettingsTab = tabs.some((t) => t.key === tab) ? tab : 'catalog';
+	function selectTab(k: SettingsTab) {
+		setTab(k);
+		const next = new URLSearchParams(sp);
+		next.set('tab', k);
+		setSp(next, { replace: true });
+	}
 
 	return (
 		<main>
@@ -816,15 +1169,33 @@ export function Settings() {
 			</h1>
 			<div className="sub">Add or edit the masters used across material requests, purchase orders and receipts. Search a list and tap a row to edit it.</div>
 
-			<div className="stack" style={{ marginTop: 22 }}>
-				<SupplierPanel canCreate={allow('Supplier')} />
-				<ItemPanel canCreate={allow('Item')} />
-				<ProjectPanel canCreate={allow('Project Master')} />
-				<SimpleMaster doctype="Company Master" icon="building" title="Companies" noun="Company" field="company_name" placeholder="e.g. Pushpa Construction" canCreate={allow('Company Master')} />
-				<SimpleMaster doctype="Material Category" icon="layers" title="Categories" noun="Category" field="category_name" placeholder="e.g. Plumbing" canCreate={allow('Material Category')} />
-				<SubCategoryPanel canCreate={allow('Material Sub Category')} />
-				<StorePanel canCreate={allow('Warehouse')} />
-				<SimpleMaster doctype="UOM" icon="cube" title="Units" noun="Unit" field="uom_name" placeholder="e.g. Box" canCreate={allow('UOM')} />
+			<div className="dtabs" style={{ marginTop: 18 }}>
+				{tabs.map((t) => (
+					<button key={t.key} className={activeTab === t.key ? 'dtab on' : 'dtab'} onClick={() => selectTab(t.key)}>
+						{t.label}
+					</button>
+				))}
+			</div>
+
+			<div className="stack" style={{ marginTop: 18 }}>
+				{activeTab === 'catalog' && (
+					<>
+						<ItemPanel canCreate={allow('Item')} />
+						<SimpleMaster doctype="Material Category" icon="layers" title="Categories" noun="Category" field="category_name" placeholder="e.g. Plumbing" canCreate={allow('Material Category')} />
+						<SubCategoryPanel canCreate={allow('Material Sub Category')} />
+						<SimpleMaster doctype="UOM" icon="cube" title="Units" noun="Unit" field="uom_name" placeholder="e.g. Box" canCreate={allow('UOM')} />
+					</>
+				)}
+				{activeTab === 'organization' && (
+					<>
+						<SupplierPanel canCreate={allow('Supplier')} />
+						<SimpleMaster doctype="Company Master" icon="building" title="Companies" noun="Company" field="company_name" placeholder="e.g. Pushpa Construction" canCreate={allow('Company Master')} />
+						<ProjectPanel canCreate={allow('Project Master')} />
+						<StorePanel canCreate={allow('Warehouse')} />
+					</>
+				)}
+				{activeTab === 'documents' && <PoTermsPanel />}
+				{activeTab === 'users' && canManageUsers && <UsersPanel />}
 			</div>
 
 			<footer>

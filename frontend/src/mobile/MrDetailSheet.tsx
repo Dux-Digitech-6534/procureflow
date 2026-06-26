@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import { API, mrDisplayStatus, actionTone, type MrDetail } from '../lib/api';
 import { Icon } from '../components/Icon';
+import { Attachment } from '../components/Attachment';
 import { useToast } from '../components/Toast';
 import { fmtDateLong, parseServerError } from '../lib/format';
 import { RelatedDocs } from './RelatedDocs';
@@ -114,9 +115,7 @@ export function MrDetailSheet({
 								<>
 									<div className="eyebrow2">{t('d.attachment')}</div>
 									<div className="attach">
-										<a href={d.attachment} target="_blank" rel="noopener noreferrer">
-											<img src={d.attachment} alt="Attached receipt" loading="lazy" />
-										</a>
+										<Attachment url={d.attachment} label="Attached file" />
 									</div>
 								</>
 							)}

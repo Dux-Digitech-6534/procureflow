@@ -15,8 +15,11 @@ import { Field, SelectInput, SearchSelect, TextArea } from '../components/form';
 import { Icon } from '../components/Icon';
 import { DocLifecycleActions } from '../components/DocLifecycleActions';
 import { LinkedDocs } from '../components/LinkedDocs';
+import { CreateSupplierModal } from '../components/CreateSupplierModal';
+import { CreateItemModal } from '../components/CreateItemModal';
 import { useToast } from '../components/Toast';
-import { fmtMoney, parseServerError } from '../lib/format';
+import { fmtMoney, parseServerError, termsHtmlToText, termsTextToHtml } from '../lib/format';
+import { whatsAppPoUrl } from '../lib/whatsapp';
 
 const AMOUNT_THRESHOLD = 50000;
 
@@ -62,7 +65,11 @@ export function NewPurchaseOrder() {
 	const toast = useToast();
 	const isEdit = !!id;
 
-	const ctx = useFrappeGetCall<{ message: PoContext }>(API.poContext, {}).data?.message;
+	const ctxRes = useFrappeGetCall<{ message: PoContext }>(API.poContext, {});
+	const ctx = ctxRes.data?.message;
+	const [supModal, setSupModal] = useState(false);
+	const [itemModal, setItemModal] = useState(false);
+	const [pendingAdd, setPendingAdd] = useState<string | null>(null);
 	const mrsRes = useFrappeGetCall<{ message: ApprovedMr[] }>(API.approvedMrs, {});
 	const approvedMrs = mrsRes.data?.message ?? [];
 
@@ -79,7 +86,7 @@ export function NewPurchaseOrder() {
 	const readOnly = !editable;
 
 	const { call: savePo, loading: saving } = useFrappePostCall<{ message: SavePoResult }>(API.savePo);
-	const { call: fetchMrItems } = useFrappePostCall<{ message: { category: string; project: string; items: PoSourceLine[] } }>(API.mrItemsForPo);
+	const { call: fetchMrItems } = useFrappePostCall<{ message: { category: string; project: string; requester?: string; items: PoSourceLine[] } }>(API.mrItemsForPo);
 	const { call: fetchGst } = useFrappePostCall<{ message: number }>(API.itemGstRate);
 	const { call: detectTax } = useFrappePostCall<{ message: string }>(API.partyTaxType);
 	const { call: changeStatus, loading: statusBusy } = useFrappePostCall<{ message: { status: string } }>(API.setPoStatus);
@@ -91,6 +98,10 @@ export function NewPurchaseOrder() {
 	const [orderDate, setOrderDate] = useState('');
 	const [requiredBy, setRequiredBy] = useState('');
 	const [remark, setRemark] = useState('');
+	const [receiver, setReceiver] = useState('');
+	const [requesters, setRequesters] = useState<string[]>([]);
+	const [terms, setTerms] = useState('');
+	const [termsSeeded, setTermsSeeded] = useState(false);
 	const [lines, setLines] = useState<Line[]>([]);
 	const [err, setErr] = useState('');
 	const [seeded, setSeeded] = useState(false);
@@ -125,6 +136,8 @@ export function NewPurchaseOrder() {
 			setOrderDate(detail.transaction_date ?? '');
 			setRequiredBy(detail.schedule_date ?? '');
 			setRemark(detail.remark ?? '');
+			setReceiver(detail.receiver ?? '');
+			setRequesters(detail.requesters ?? []);
 			setLines(
 				detail.items.map((it) => ({
 					item_code: it.item_code,
@@ -147,6 +160,23 @@ export function NewPurchaseOrder() {
 			setSeeded(true);
 		}
 	}, [isEdit, detail, seeded]);
+
+	// Seed the Terms & Conditions box once. New PO -> the editable default; editing
+	// -> the PO's saved terms, falling back to the default for older POs that have
+	// none. Kept separate from the field seed above so it can wait for whichever of
+	// detail / ctx provides its source.
+	useEffect(() => {
+		if (termsSeeded) return;
+		if (isEdit) {
+			if (!detail) return;
+			if (!detail.terms && !ctx) return; // wait for ctx to supply the default
+			setTerms(termsHtmlToText(detail.terms || ctx?.default_terms || ''));
+		} else {
+			if (!ctx) return;
+			setTerms(termsHtmlToText(ctx.default_terms || ''));
+		}
+		setTermsSeeded(true);
+	}, [isEdit, detail, ctx, termsSeeded]);
 
 	const itemsRes = useFrappeGetCall<{ message: ItemOption[] }>(
 		API.itemSearch,
@@ -228,6 +258,15 @@ export function NewPurchaseOrder() {
 		void appendItems([{ item_code: opt.value, item_name: opt.label, uom: opt.uom, uoms: opt.uoms, sub_category: opt.sub_category, category }]);
 	}
 
+	// After an inline item create + list refresh, auto-add the new item to the order.
+	useEffect(() => {
+		if (pendingAdd && (itemsRes.data?.message ?? []).some((o) => o.value === pendingAdd)) {
+			addByCategory(pendingAdd);
+			setPendingAdd(null);
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [pendingAdd, itemsRes.data]);
+
 	async function pullFromMr(mrName: string) {
 		if (!mrName) return;
 		setErr('');
@@ -244,6 +283,7 @@ export function NewPurchaseOrder() {
 			}
 			if (msg.category) setCategory(msg.category);
 			if (msg.project) setProject(msg.project);
+			if (msg.requester) setRequesters((rs) => (rs.includes(msg.requester!) ? rs : [...rs, msg.requester!]));
 			await appendItems(msg.items.map((it) => ({ ...it, category: msg.category })));
 		} catch (e) {
 			setErr(parseServerError(e));
@@ -329,6 +369,7 @@ export function NewPurchaseOrder() {
 		if (hasGst && !taxType) return setErr('Select the tax type (Intra-State or Inter-State).');
 		if (strict && lines.some((l) => num(l.qty) <= 0 || num(l.rate) <= 0))
 			return setErr('Every line needs a quantity and a rate.');
+		if (strict && !receiver) return setErr('Assign a receiver before placing the order.');
 		try {
 			const payload = {
 				name: id ?? null,
@@ -339,6 +380,8 @@ export function NewPurchaseOrder() {
 				transaction_date: orderDate || null,
 				schedule_date: requiredBy || null,
 				remark,
+				terms: termsTextToHtml(terms),
+				receiver: receiver || null,
 				submit_for_approval: strict,
 				items: lines.map((l) => ({
 					item_code: l.item_code,
@@ -362,8 +405,12 @@ export function NewPurchaseOrder() {
 			// Draft -> Approved after "Place order") and its buttons update without a
 			// manual refresh. A brand-new PO changes the route, which refetches.
 			if (isEdit && res.message.name === id) {
-				setSeeded(false);
+				// Revalidate FIRST so the cache holds the freshly-saved doc, THEN drop the
+				// seed guards so the seed effects re-run against the NEW data — not the
+				// stale cache (which caused the items to lag one save behind).
 				await detailRes.mutate();
+				setSeeded(false);
+				setTermsSeeded(false);
 			} else {
 				navigate('/purchase-orders/' + res.message.name);
 			}
@@ -436,6 +483,15 @@ export function NewPurchaseOrder() {
 				{isEdit && detail && (
 					<button className="btn" onClick={printPo} title="Open the purchase order print format in a new tab">
 						<Icon name="file-text" size={15} /> Print
+					</button>
+				)}
+				{isEdit && detail && detail.docstatus === 1 && (
+					<button
+						className="btn"
+						onClick={() => window.open(whatsAppPoUrl(detail), '_blank', 'noopener')}
+						title={detail.supplier_mobile ? `Send to ${detail.supplier_name || detail.supplier} on WhatsApp` : 'Open WhatsApp (no supplier number on file — pick a contact)'}
+					>
+						<Icon name="whatsapp" size={15} /> WhatsApp
 					</button>
 				)}
 				{isEdit && detail && detail.docstatus === 1 && detail.status !== 'Closed' && (detail.per_received ?? 0) < 100 && (
@@ -526,6 +582,8 @@ export function NewPurchaseOrder() {
 								disabled={readOnly}
 								placeholder="Select supplier…"
 								options={(ctx?.suppliers ?? []).map((s) => ({ value: s.name, label: s.supplier_name || s.name }))}
+								onCreate={readOnly ? undefined : () => setSupModal(true)}
+								createLabel="New supplier"
 							/>
 						</Field>
 						<Field label="Project" hint={fromMr ? 'Set by the material request.' : 'Company, store & warehouse fill from the project.'}>
@@ -601,6 +659,18 @@ export function NewPurchaseOrder() {
 						<Field label="Store / warehouse">
 							<input className="inp" disabled value={storeName || '—'} />
 						</Field>
+						<Field label="Receiver" required hint="Who will receive this material — only they can make its receipt.">
+							<SearchSelect
+								value={receiver}
+								onChange={setReceiver}
+								disabled={readOnly}
+								placeholder="Select receiver…"
+								options={(ctx?.receivers ?? []).map((r) => ({ value: r.user, label: r.full_name, sub: r.mobile_no || undefined }))}
+							/>
+						</Field>
+						<Field label="Requested by" hint="Who raised the material request(s).">
+							<input className="inp" disabled value={requesters.length ? requesters.join(', ') : '—'} />
+						</Field>
 						<div className="span2">
 							<Field label="Remark">
 								<TextArea value={remark} onChange={setRemark} rows={2} disabled={readOnly} placeholder="Header note…" />
@@ -625,6 +695,8 @@ export function NewPurchaseOrder() {
 									disabled={!category}
 									placeholder={category ? 'Search and add an item…' : 'Pick a category (or pull a material request) first'}
 									options={pickerOptions}
+									onCreate={category ? () => setItemModal(true) : undefined}
+									createLabel="New item"
 								/>
 							</div>
 						</div>
@@ -706,6 +778,23 @@ export function NewPurchaseOrder() {
 						</div>
 					))}
 				</section>
+
+				<section className="card">
+					<div className="chead">
+						<Icon name="file-text" size={16} />
+						<span className="ttl">Terms &amp; conditions</span>
+					</div>
+					<div className="formgrid">
+						<div className="span2">
+							<Field
+								label="Printed at the bottom of this purchase order"
+								hint="One point per line. Prefilled from your default (Settings → PO Terms &amp; Conditions) — edit here to change it for this order only."
+							>
+								<TextArea value={terms} onChange={setTerms} rows={6} disabled={readOnly} placeholder="One term per line…" />
+							</Field>
+						</div>
+					</div>
+				</section>
 				</div>
 
 				<div className="stack">
@@ -747,6 +836,19 @@ export function NewPurchaseOrder() {
 					{isEdit && detail && <LinkedDocs doctype="Purchase Order" name={detail.name} />}
 				</div>
 			</div>
+			{supModal && (
+				<CreateSupplierModal
+					onClose={() => setSupModal(false)}
+					onCreated={async (nm) => { setSupModal(false); await ctxRes.mutate(); onSupplier(nm); }}
+				/>
+			)}
+			{itemModal && (
+				<CreateItemModal
+					category={category}
+					onClose={() => setItemModal(false)}
+					onCreated={async (code) => { setItemModal(false); await itemsRes.mutate(); setPendingAdd(code); }}
+				/>
+			)}
 		</main>
 	);
 }

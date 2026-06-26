@@ -95,3 +95,40 @@ export function parseServerError(e: unknown): string {
 	}
 	return (err?.exception || err?.message || 'Something went wrong').replace(/<[^>]+>/g, '').trim();
 }
+
+/* -------------------------------- Terms helpers ----------------------------- */
+// PO Terms & Conditions are stored as HTML (an <ol> of points) but edited as
+// plain text — one point per line. These convert between the two so the Settings
+// and PO editors stay simple while the print format renders a clean list.
+
+function stripTags(s: string): string {
+	return s
+		.replace(/<\s*br\s*\/?>/gi, '\n')
+		.replace(/<\/(p|li|div|ol|ul)\s*>/gi, '\n')
+		.replace(/<[^>]+>/g, '')
+		.replace(/&nbsp;/gi, ' ')
+		.replace(/&amp;/gi, '&')
+		.replace(/&lt;/gi, '<')
+		.replace(/&gt;/gi, '>');
+}
+
+/** Terms HTML → editor text (one point per line). */
+export function termsHtmlToText(html: string | null | undefined): string {
+	if (!html) return '';
+	const items = [...html.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)];
+	const lines = items.length
+		? items.map((m) => stripTags(m[1]))
+		: stripTags(html).split(/\n+/);
+	return lines.map((l) => l.trim()).filter(Boolean).join('\n');
+}
+
+/** Editor text → terms HTML, one <div> per line. NOT an <ol>: the print must show
+ *  the lines exactly as typed (no automatic numbering) so the user controls their
+ *  own numbering. Blank lines are preserved as spacing. */
+export function termsTextToHtml(text: string | null | undefined): string {
+	const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	const lines = (text ?? '').replace(/\r\n/g, '\n').split('\n');
+	while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+	if (!lines.length) return '';
+	return lines.map((l) => (l.trim() ? `<div>${esc(l)}</div>` : '<div>&nbsp;</div>')).join('');
+}

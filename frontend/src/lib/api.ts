@@ -12,6 +12,8 @@ export const API = {
 	savePo: 'procureflow.react_api.save_purchase_order',
 	poList: 'procureflow.react_api.po_list',
 	poDetail: 'procureflow.react_api.po_detail',
+	getPoTerms: 'procureflow.react_api.get_po_terms',
+	savePoTerms: 'procureflow.react_api.save_po_terms',
 	itemGstRate: 'procureflow.purchase_tax.get_item_gst_rate',
 	applyAction: 'procureflow.react_api.apply_action',
 	cancelDoc: 'procureflow.react_api.cancel_doc',
@@ -30,6 +32,13 @@ export const API = {
 	settingsCanCreate: 'procureflow.react_api.settings_can_create',
 	renameMaster: 'procureflow.react_api.rename_master',
 	updateMaster: 'procureflow.react_api.update_master',
+	createMaster: 'procureflow.react_api.create_master',
+	saveItem: 'procureflow.react_api.save_item',
+	assignableRoles: 'procureflow.react_api.assignable_roles',
+	usersList: 'procureflow.react_api.users_list',
+	createUser: 'procureflow.react_api.create_user',
+	updateUser: 'procureflow.react_api.update_user',
+	resetUserPassword: 'procureflow.react_api.reset_user_password',
 	userInfo: 'procureflow.react_api.user_info',
 	capabilities: 'procureflow.react_api.capabilities',
 	notifications: 'procureflow.react_api.notifications',
@@ -319,6 +328,12 @@ export interface SupplierOption {
 	supplier_name: string;
 }
 
+export interface ReceiverOption {
+	user: string;
+	full_name: string;
+	mobile_no: string;
+}
+
 export interface PoContext {
 	company: string;
 	suppliers: SupplierOption[];
@@ -326,6 +341,8 @@ export interface PoContext {
 	projects: ProjectOption[];
 	tax_types: string[];
 	today: string;
+	default_terms: string;
+	receivers: ReceiverOption[];
 }
 
 export interface ApprovedMr {
@@ -399,6 +416,13 @@ export interface PoDetail extends DocActionState {
 	company: string | null;
 	tax_type: string | null;
 	remark: string | null;
+	terms: string | null;
+	receiver: string | null;
+	receiver_name: string | null;
+	receiver_mobile: string | null;
+	requesters: string[];
+	supplier_mobile: string | null;
+	pdf_url: string | null;
 	transaction_date: string | null;
 	schedule_date: string | null;
 	workflow_state: string | null;
@@ -633,6 +657,25 @@ export interface Capabilities {
 	read_pr: boolean;
 	read_stock: boolean;
 	approve: boolean;
+	reports: boolean;
+	manage_users: boolean;
+	email_configured: boolean;
+}
+
+export interface AssignableRole {
+	role: string;
+	label: string;
+	description: string;
+}
+
+export interface ManagedUser {
+	name: string;
+	full_name: string | null;
+	email: string | null;
+	mobile_no: string | null;
+	enabled: number;
+	roles: string[];
+	is_admin: boolean;
 }
 
 export interface NotificationItem {

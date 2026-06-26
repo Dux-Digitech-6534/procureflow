@@ -31,7 +31,7 @@ COMPANY_FIELDS = {
 # Everyone else is scoped to the projects/companies granted via User Permission;
 # a scoped user with no User Permission sees nothing (safe default). Extend this
 # set (e.g. add "Purchase Officer") if a role should see the whole group.
-PRIVILEGED_DASHBOARD_ROLES = {"System Manager", "Administrator"}
+PRIVILEGED_DASHBOARD_ROLES = {"System Manager", "Administrator", "Report Viewer"}
 
 
 def get_dashboard_scope():

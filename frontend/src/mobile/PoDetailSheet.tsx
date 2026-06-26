@@ -4,6 +4,7 @@ import { API, poDisplayStatus, actionTone, type PoDetail } from '../lib/api';
 import { Icon } from '../components/Icon';
 import { useToast } from '../components/Toast';
 import { fmtDateLong, fmtMoney, parseServerError } from '../lib/format';
+import { whatsAppPoUrl } from '../lib/whatsapp';
 import { RelatedDocs } from './RelatedDocs';
 import { useLang, tStatus } from './i18n';
 
@@ -123,6 +124,18 @@ export function PoDetailSheet({
 								<span className="k">{t('d.grandTotal')}</span>
 								<span className="v">{fmtMoney(total, 'INR')}</span>
 							</div>
+
+							{d.docstatus === 1 && (
+								<a
+									className="mbtn sec"
+									href={whatsAppPoUrl(d)}
+									target="_blank"
+									rel="noopener noreferrer"
+									style={{ marginTop: 16, justifyContent: 'center', width: '100%' }}
+								>
+									<Icon name="whatsapp" size={17} /> Send on WhatsApp
+								</a>
+							)}
 
 							<RelatedDocs doctype="Purchase Order" name={name} />
 						</>

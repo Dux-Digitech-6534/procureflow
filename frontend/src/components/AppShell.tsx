@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Navigate, Outlet, useLocation } from 'react-router-dom';
-import { useFrappeAuth } from 'frappe-react-sdk';
+import { useFrappeAuth, useFrappeGetCall } from 'frappe-react-sdk';
 import { Icon, type IconName } from './Icon';
 import { useTheme } from '../lib/theme';
+import { API, type Capabilities } from '../lib/api';
 
 const NAV: { to: string; label: string; icon: IconName }[] = [
 	{ to: '/dashboard', label: 'Dashboard', icon: 'layers' },
@@ -78,6 +79,13 @@ export function AppShell() {
 	const isPhone = usePhoneWidth();
 	const location = useLocation();
 
+	// Reports is gated to admins / Report Viewer; hide its nav entry otherwise.
+	const capsRes = useFrappeGetCall<{ message: Capabilities }>(API.capabilities, undefined, 'pf:caps');
+	const caps = capsRes.data?.message;
+	const canReports = !!caps?.reports;
+	const navItems = NAV.filter((i) => i.to !== '/reports' || canReports);
+	const mobileMore = MOBILE_MORE.filter((i) => i.to !== '/reports' || canReports);
+
 	async function doLogout() {
 		try {
 			await logout();
@@ -112,7 +120,7 @@ export function AppShell() {
 				</div>
 
 				<nav className="snav">
-					{NAV.map((item) => (
+					{navItems.map((item) => (
 						<NavLink key={item.to} to={item.to} className={linkClass} title={collapsed ? item.label : undefined}>
 							<Icon name={item.icon} size={16} />
 							<span className="lbl">{item.label}</span>
@@ -200,7 +208,7 @@ export function AppShell() {
 						<div className="msheet" role="dialog" aria-label="More navigation">
 							<div className="msheet-grab" />
 							<div className="msheet-list">
-								{MOBILE_MORE.map((item) => (
+								{mobileMore.map((item) => (
 									<NavLink key={item.to} to={item.to} className={linkClass} onClick={() => setMoreOpen(false)}>
 										<Icon name={item.icon} size={17} />
 										<span>{item.label}</span>

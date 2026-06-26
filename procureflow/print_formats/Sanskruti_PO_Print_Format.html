@@ -278,23 +278,23 @@ body,
 }
 
 .po-items-table col.po-col-sl {
-    width: 5%;
+    width: 4%;
 }
 
 .po-items-table col.po-col-code {
-    width: 10%;
+    width: 11%;
 }
 
 .po-items-table col.po-col-desc {
-    width: 22%;
+    width: 20%;
 }
 
 .po-items-table col.po-col-uom {
-    width: 7%;
+    width: 10%;
 }
 
 .po-items-table col.po-col-qty {
-    width: 9%;
+    width: 8%;
 }
 
 .po-items-table col.po-col-rate {
@@ -306,15 +306,15 @@ body,
 }
 
 .po-items-table col.po-col-gst {
-    width: 7%;
+    width: 6%;
 }
 
 .po-items-table col.po-col-gst-amount {
-    width: 10%;
+    width: 9%;
 }
 
 .po-items-table col.po-col-total {
-    width: 13%;
+    width: 10%;
 }
 
 .po-items-table thead {
@@ -625,14 +625,15 @@ body,
     {% set terms_data.content = frappe.db.get_value("Terms and Conditions", doc.get("tc_name"), "terms") or "" %}
 {% endif %}
 {% if not terms_data.content %}
+    {% set terms_data.content = frappe.db.get_value("Terms and Conditions", "Default PO Terms", "terms") or "" %}
+{% endif %}
+{% if not terms_data.content %}
     {% set terms_data.content = "
-        <ol>
-            <li>Please supply the materials as per the specifications, quality and quantity mentioned above.</li>
-            <li>Delivery must be completed on or before the required by date.</li>
-            <li>All invoices must be raised in the name of the company.</li>
-            <li>Payment will be made as per the agreed payment terms.</li>
-            <li>Goods once supplied will not be taken back.</li>
-        </ol>
+        <div>1. Please supply the materials as per the specifications, quality and quantity mentioned above.</div>
+        <div>2. Delivery must be completed on or before the required by date.</div>
+        <div>3. All invoices must be raised in the name of the company.</div>
+        <div>4. Payment will be made as per the agreed payment terms.</div>
+        <div>5. Goods once supplied will not be taken back.</div>
     " %}
 {% endif %}
 
@@ -754,7 +755,20 @@ body,
                         {% endif %}
                     </div>
 
+                    {% set _recv = frappe.db.get_value("User", doc.get("custom_receiver"), ["full_name", "mobile_no"], as_dict=True) if doc.get("custom_receiver") else None %}
                     <div class="po-contact">
+                        {% if _recv and _recv.full_name %}
+                            <div class="po-contact-row">
+                                <span class="po-contact-label">Receiver:</span>
+                                <span class="po-contact-value">{{ _recv.full_name }}</span>
+                            </div>
+                        {% endif %}
+                        {% if _recv and _recv.mobile_no %}
+                            <div class="po-contact-row">
+                                <span class="po-contact-label">Mobile:</span>
+                                <span class="po-contact-value">{{ _recv.mobile_no }}</span>
+                            </div>
+                        {% endif %}
                         {% if doc.get("shipping_contact_mobile") %}
                             <div class="po-contact-row">
                                 <span class="po-contact-label">Phone:</span>
@@ -798,26 +812,10 @@ body,
             <tr>
                 <td class="po-info-label">GST Number</td>
                 <td class="po-info-value">{{ supplier_gstin or "" }}</td>
-                <td class="po-info-label">PAN Number</td>
-                <td class="po-info-value">{{ supplier_pan or "" }}</td>
-            </tr>
-
-            <tr>
                 <td class="po-info-label">Site / Project</td>
                 <td class="po-info-value">
                     {% if data.project_name %}{{ data.project_name }}{% endif %}
                 </td>
-                <td class="po-info-label">Warehouse</td>
-                <td class="po-info-value">
-                    {% if data.warehouse %}{{ data.warehouse }}{% endif %}
-                </td>
-            </tr>
-
-            <tr>
-                <td class="po-info-label">Site Supervisor Name</td>
-                <td class="po-info-value">{{ doc.get("custom_supervisor_name") or "" }}</td>
-                <td class="po-info-label">Site Supervisor Number</td>
-                <td class="po-info-value">{{ doc.get("custom_supervisor_mobile") or "" }}</td>
             </tr>
         </table>
     </div>
@@ -901,7 +899,7 @@ body,
                         {% endif %}
                     </td>
 
-                    <td class="po-text-center po-nowrap">
+                    <td class="po-text-center po-wrap">
                         {{ item.get("uom") or item.get("stock_uom") or "" }}
                     </td>
 

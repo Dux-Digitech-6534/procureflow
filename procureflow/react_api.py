@@ -8,6 +8,8 @@ sub-category) — the React front-door's one deliberate difference from the desk
 picker.
 """
 
+import hashlib
+import hmac
 import json
 
 import frappe
@@ -403,6 +405,144 @@ TAX_TYPES = ["Intra-State (CGST + SGST)", "Inter-State (IGST)", "Unregistered / 
 # set by the before_submit hook in signature_api). Used by the SPA's Print button.
 PO_PRINT_FORMAT = "Sanskruti PO Print Format"
 
+# Editable default PO Terms & Conditions. Stored as a normal "Terms and Conditions"
+# master record so it is a standard ERPNext template too. Edited from the Settings
+# page, prefilled into each new PO (-> doc.terms), and the print format's fallback.
+PO_TERMS_DOC = "Default PO Terms"
+# Stored as one <div> per line (NOT an <ol>) so the print shows the text exactly as
+# written — numbering is part of the text and fully user-controlled.
+DEFAULT_PO_TERMS_HTML = (
+    "<div>1. Please supply the materials as per the specifications, quality and quantity mentioned above.</div>"
+    "<div>2. Delivery must be completed on or before the required by date.</div>"
+    "<div>3. All invoices must be raised in the name of the company.</div>"
+    "<div>4. Payment will be made as per the agreed payment terms.</div>"
+    "<div>5. Goods once supplied will not be taken back.</div>"
+)
+
+
+def _po_terms_default():
+    """Default PO Terms HTML. Seeds the 'Default PO Terms' master (with the
+    original hardcoded list) on first access, so there is always an editable
+    record and the print format's fallback resolves to it."""
+    terms = frappe.db.get_value("Terms and Conditions", PO_TERMS_DOC, "terms")
+    if terms is None:
+        doc = frappe.new_doc("Terms and Conditions")
+        doc.title = PO_TERMS_DOC
+        if doc.meta.has_field("buying"):
+            doc.buying = 1
+        if doc.meta.has_field("selling"):
+            doc.selling = 0
+        doc.terms = DEFAULT_PO_TERMS_HTML
+        doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+        terms = DEFAULT_PO_TERMS_HTML
+    return terms or ""
+
+
+@frappe.whitelist()
+def get_po_terms():
+    """Default PO Terms & Conditions — for the Settings editor and the New PO
+    prefill. can_edit gates the Settings save button."""
+    return {
+        "terms": _po_terms_default(),
+        "can_edit": bool(frappe.has_permission("Terms and Conditions", "write")),
+    }
+
+
+@frappe.whitelist()
+def save_po_terms(terms):
+    """Update the editable default PO Terms & Conditions (Settings page)."""
+    if not frappe.has_permission("Terms and Conditions", "write"):
+        frappe.throw(_("You are not allowed to edit terms & conditions."))
+    _po_terms_default()  # ensure the record exists
+    doc = frappe.get_doc("Terms and Conditions", PO_TERMS_DOC)
+    doc.terms = terms or ""
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return {"terms": doc.terms}
+
+
+# Receiver = the mobile user assigned to receive a PO's material. The eligible pool
+# is the "Mobile Access" cohort = users holding the Supervisor role. Purchase Receipt
+# creation is restricted to a PO's assigned receiver (admin roles exempt).
+RECEIVER_ROLE = "Supervisor"
+
+
+def _is_receive_admin():
+    """Admin roles bypass the receiver-only receipt rule (safety override)."""
+    return bool(set(frappe.get_roles()) & _CAP_ADMIN_ROLES)
+
+
+def _receivers():
+    """Eligible PO receivers: enabled users holding the Supervisor (mobile-access)
+    role, with display name + mobile — for the PO receiver picker and the print."""
+    rows = frappe.get_all(
+        "Has Role",
+        filters={"role": RECEIVER_ROLE, "parenttype": "User"},
+        fields=["parent"],
+        limit_page_length=0,
+    )
+    out = []
+    for u in sorted({r.parent for r in rows} - {"Administrator", "Guest"}):
+        info = frappe.db.get_value("User", u, ["enabled", "full_name", "mobile_no"], as_dict=True)
+        if info and info.enabled:
+            out.append({"user": u, "full_name": info.full_name or u, "mobile_no": info.mobile_no or ""})
+    out.sort(key=lambda x: (x["full_name"] or "").lower())
+    return out
+
+
+def _guard_receiver(po_name, receiver=None):
+    """Reject a Purchase Receipt attempt by anyone who is not the PO's assigned
+    receiver (admin roles exempt). Pass receiver to avoid a re-read."""
+    if _is_receive_admin():
+        return
+    if receiver is None:
+        receiver = frappe.db.get_value("Purchase Order", po_name, "custom_receiver")
+    if receiver != frappe.session.user:
+        frappe.throw(
+            _("Only the assigned receiver can create the receipt for this purchase order."),
+            frappe.PermissionError,
+        )
+
+
+def _po_pdf_token(name):
+    """Stable, unguessable per-PO token (HMAC of the PO name with the site's
+    encryption key) — lets a public 'view PO PDF' link be shared with a supplier
+    without login, while staying impossible to forge or enumerate."""
+    secret = frappe.local.conf.get("encryption_key") or frappe.local.conf.get("secret_key") or "procureflow"
+    return hmac.new(secret.encode(), ("procureflow-po:" + (name or "")).encode(), hashlib.sha256).hexdigest()[:40]
+
+
+def _po_pdf_url(name):
+    """Absolute public URL to the PO PDF (for the WhatsApp message)."""
+    from urllib.parse import quote
+    from frappe.utils import get_url
+
+    return get_url(
+        "/api/method/procureflow.react_api.public_po_pdf?name=" + quote(name or "") + "&token=" + _po_pdf_token(name)
+    )
+
+
+@frappe.whitelist(allow_guest=True)
+def public_po_pdf(name=None, token=None):
+    """Serve a finalized PO as a PDF to anyone holding the correct token (the
+    supplier, via the WhatsApp link). The token is the only credential; it proves
+    authorization, so we render as a system user (the print pulls Company/Project/
+    User docs that a guest couldn't read)."""
+    if not name or not token or not hmac.compare_digest(str(token), _po_pdf_token(name)):
+        frappe.throw(_("Invalid or expired link."), frappe.PermissionError)
+    if frappe.db.get_value("Purchase Order", name, "docstatus") != 1:
+        frappe.throw(_("This purchase order is not available."), frappe.PermissionError)
+    orig = frappe.session.user
+    try:
+        frappe.set_user("Administrator")
+        pdf = frappe.get_print("Purchase Order", name, PO_PRINT_FORMAT, as_pdf=True)
+    finally:
+        frappe.set_user(orig)
+    frappe.local.response.filename = name + ".pdf"
+    frappe.local.response.filecontent = pdf
+    frappe.local.response.type = "download"
+
 
 @frappe.whitelist()
 def po_context():
@@ -422,6 +562,8 @@ def po_context():
         "projects": projects,
         "tax_types": TAX_TYPES,
         "today": nowdate(),
+        "default_terms": _po_terms_default(),
+        "receivers": _receivers(),
     }
 
 
@@ -484,6 +626,7 @@ def mr_items_for_po(material_request):
     return {
         "category": doc.custom_category,
         "project": doc.custom_select_project_,
+        "requester": (frappe.db.get_value("User", doc.owner, "full_name") or doc.owner) if doc.owner else None,
         "items": [r for r in out if r["qty"] > 0],
     }
 
@@ -538,6 +681,17 @@ def save_purchase_order(data):
     if company_master:
         doc.custom_test_company_ = company_master
     doc.custom_remark = data.get("remark")
+    # Per-PO Terms & Conditions (prefilled from the editable default on the New PO
+    # screen, then overridable for that order). Standard ERPNext field doc.terms,
+    # which the print format renders first.
+    if "terms" in data:
+        doc.terms = data.get("terms") or None
+    # Receiver: the mobile user who will receive this material; required to PLACE
+    # the order (a receipt can only be made by this person). Draft saves may omit it.
+    if doc.meta.has_field("custom_receiver"):
+        doc.custom_receiver = data.get("receiver") or None
+    if data.get("submit_for_approval") and not data.get("receiver"):
+        frappe.throw(_("Assign a receiver before placing the order."))
     if data.get("tax_type"):
         doc.custom_tax_type = data.get("tax_type")
     if not doc.get("workflow_state"):
@@ -663,6 +817,20 @@ def po_detail(name):
         if flt(t.tax_amount)
     ]
     material_requests = sorted({it.get("material_request") for it in doc.items if it.get("material_request")})
+    # Requester(s): distinct creators of the source material requests (display name).
+    requester_names = []
+    for mr in material_requests:
+        owner = frappe.db.get_value("Material Request", mr, "owner")
+        nm = (frappe.db.get_value("User", owner, "full_name") or owner) if owner else None
+        if nm and nm not in requester_names:
+            requester_names.append(nm)
+    receiver = doc.get("custom_receiver")
+    recv = frappe.db.get_value("User", receiver, ["full_name", "mobile_no"], as_dict=True) if receiver else None
+    # WhatsApp share (only once finalized): supplier number + a tokenised public
+    # PDF link the supplier can open without logging in.
+    is_final = doc.docstatus == 1
+    supplier_mobile = frappe.db.get_value("Supplier", doc.supplier, "mobile_no") if doc.supplier else None
+    pdf_url = _po_pdf_url(doc.name) if is_final else None
     can_change_status = bool(doc.docstatus == 1 and frappe.has_permission("Purchase Order", "submit", doc))
     return {
         "name": doc.name,
@@ -673,6 +841,13 @@ def po_detail(name):
         "company": doc.get("custom_test_company_"),
         "tax_type": doc.get("custom_tax_type"),
         "remark": doc.custom_remark,
+        "terms": doc.get("terms"),
+        "receiver": receiver,
+        "receiver_name": recv.full_name if recv else None,
+        "receiver_mobile": recv.mobile_no if recv else None,
+        "requesters": requester_names,
+        "supplier_mobile": supplier_mobile,
+        "pdf_url": pdf_url,
         "transaction_date": doc.transaction_date,
         "schedule_date": doc.schedule_date,
         "workflow_state": doc.workflow_state,
@@ -819,10 +994,14 @@ def _pr_pay_info(name):
 
 @frappe.whitelist()
 def receivable_pos():
-    """Approved POs that still have quantity left to receive."""
+    """Approved POs that still have quantity left to receive. Scoped to the POs the
+    current user is the assigned receiver of (admin roles see all)."""
+    filters = {"docstatus": 1, "per_received": ["<", 100], "status": ["not in", ["Closed"]]}
+    if not _is_receive_admin():
+        filters["custom_receiver"] = frappe.session.user
     return frappe.get_all(
         "Purchase Order",
-        filters={"docstatus": 1, "per_received": ["<", 100], "status": ["not in", ["Closed"]]},
+        filters=filters,
         fields=["name", "supplier", "supplier_name", "custom_project_name", "grand_total", "transaction_date", "per_received"],
         order_by="transaction_date desc",
         limit_page_length=100,
@@ -833,6 +1012,7 @@ def receivable_pos():
 def po_receipt_items(purchase_order):
     doc = frappe.get_doc("Purchase Order", purchase_order)
     doc.check_permission("read")
+    _guard_receiver(doc.name, doc.get("custom_receiver"))
     items = []
     for it in doc.items:
         pending = flt(it.qty) - flt(it.received_qty)
@@ -860,6 +1040,8 @@ def create_receipt(data):
     po = data.get("purchase_order")
     if not po:
         frappe.throw(_("Select a purchase order."))
+    # Only the PO's assigned receiver (or an admin) may create its receipt.
+    _guard_receiver(po)
 
     qty_map = {r["po_item"]: flt(r.get("qty")) for r in data.get("items", []) if r.get("po_item")}
     pr = make_purchase_receipt(po)
@@ -1011,15 +1193,21 @@ def payment_list(limit=100):
     )
 
 
+# Master doctypes the Settings page + inline pickers may create/edit/rename.
+MASTER_DOCTYPES = {
+    "Supplier", "Item", "Company Master", "Project Master",
+    "Material Category", "Material Sub Category", "Warehouse", "UOM",
+}
+
+# GST rate (%) -> Item Tax Template. 0 / unmapped => no template (resolves to 0%).
+GST_RATE_TEMPLATE = {5: "GST 5% - SG", 12: "GST 12% - SG", 18: "GST 18 % - SG", 28: "GST 28% - SG"}
+
+
 @frappe.whitelist()
 def settings_can_create():
     """Which master doctypes the current user may CREATE — so the Settings page
     can hide the 'New' action (read-only) where the user lacks permission."""
-    dts = [
-        "Supplier", "Item", "Company Master", "Project Master",
-        "Material Category", "Material Sub Category", "Warehouse", "UOM",
-    ]
-    return {dt: bool(frappe.has_permission(dt, "create")) for dt in dts}
+    return {dt: bool(frappe.has_permission(dt, "create")) for dt in sorted(MASTER_DOCTYPES)}
 
 
 @frappe.whitelist()
@@ -1027,11 +1215,7 @@ def rename_master(doctype, old_name, new_name, field=None):
     """Rename a master record — cascading the rename to every document that
     links to it — and sync its display field. Lets the Settings page edit a
     master's NAME safely (a plain field update would desync name vs links)."""
-    allowed = {
-        "Supplier", "Item", "Company Master", "Project Master",
-        "Material Category", "Material Sub Category", "Warehouse", "UOM",
-    }
-    if doctype not in allowed:
+    if doctype not in MASTER_DOCTYPES:
         frappe.throw(_("Cannot rename {0}.").format(doctype))
     if not frappe.has_permission(doctype, "write"):
         frappe.throw(_("You are not allowed to edit {0}.").format(doctype))
@@ -1052,11 +1236,7 @@ def rename_master(doctype, old_name, new_name, field=None):
 def update_master(doctype, name, values):
     """Update non-identity fields of a master record from the Settings page.
     Permission-checked; only the whitelisted master doctypes are editable."""
-    allowed = {
-        "Supplier", "Item", "Company Master", "Project Master",
-        "Material Category", "Material Sub Category", "Warehouse", "UOM",
-    }
-    if doctype not in allowed:
+    if doctype not in MASTER_DOCTYPES:
         frappe.throw(_("Cannot edit {0}.").format(doctype))
     doc = frappe.get_doc(doctype, name)
     doc.check_permission("write")
@@ -1066,6 +1246,91 @@ def update_master(doctype, name, values):
         if meta.has_field(k):
             doc.set(k, v)
     doc.save()
+    return doc.name
+
+
+@frappe.whitelist()
+def create_master(doctype, values):
+    """Create a master from the Settings page or an inline picker. Item is routed
+    through save_item (so its flags/group/HSN/GST/UOM stay correct); the other
+    masters are created generically with a create-permission check."""
+    if doctype not in MASTER_DOCTYPES:
+        frappe.throw(_("Cannot create {0}.").format(doctype))
+    if doctype == "Item":
+        return save_item(values)
+    if not frappe.has_permission(doctype, "create"):
+        frappe.throw(_("You are not allowed to create {0}.").format(doctype))
+    values = _loads(values) or {}
+    doc = frappe.new_doc(doctype)
+    meta = frappe.get_meta(doctype)
+    for k, v in values.items():
+        if meta.has_field(k):
+            doc.set(k, v)
+    doc.insert()
+    frappe.db.commit()
+    return doc.name
+
+
+@frappe.whitelist()
+def save_item(data):
+    """Create or update an Item with the procurement-correct setup — one path for
+    BOTH the Settings item form and the inline 'New item' modal so they can't
+    drift. Keyed on item_code (new code = create). Forces is_sales_item=0 /
+    include_item_in_manufacturing=0, item_group default 'Products', and writes
+    category/sub-category, HSN (custom_hsn_code), GST (via Item Tax Template) and
+    UOM conversions."""
+    data = _loads(data)
+    code = (data.get("item_code") or "").strip()
+    if not code:
+        frappe.throw(_("Item code is required."))
+    creating = not frappe.db.exists("Item", code)
+    if creating:
+        if not frappe.has_permission("Item", "create"):
+            frappe.throw(_("You are not allowed to create items."))
+        doc = frappe.new_doc("Item")
+        doc.item_code = code
+        doc.item_group = data.get("item_group") or "Products"
+        doc.is_stock_item = 1
+        doc.is_purchase_item = 1
+        doc.is_sales_item = 0
+        doc.include_item_in_manufacturing = 0
+    else:
+        doc = frappe.get_doc("Item", code)
+        doc.check_permission("write")
+
+    if data.get("item_name"):
+        doc.item_name = data.get("item_name")
+    if data.get("stock_uom"):
+        doc.stock_uom = data.get("stock_uom")
+    if doc.meta.has_field("custom_category"):
+        doc.custom_category = data.get("custom_category") or None
+    if doc.meta.has_field("custom_sub_category"):
+        doc.custom_sub_category = data.get("custom_sub_category") or None
+    if doc.meta.has_field("custom_hsn_code"):
+        doc.custom_hsn_code = data.get("hsn") or data.get("custom_hsn_code") or ""
+
+    uoms = data.get("uoms")
+    if uoms is not None:
+        su = doc.stock_uom
+        doc.set("uoms", [])
+        seen = {su}
+        doc.append("uoms", {"uom": su, "conversion_factor": 1})
+        for r in uoms:
+            u = r.get("uom")
+            cf = flt(r.get("conversion_factor"))
+            if u and u not in seen and cf > 0:
+                doc.append("uoms", {"uom": u, "conversion_factor": cf})
+                seen.add(u)
+
+    gst = data.get("gst")
+    if gst is not None and gst != "":
+        doc.set("taxes", [])
+        tpl = GST_RATE_TEMPLATE.get(int(flt(gst)))
+        if tpl and frappe.db.exists("Item Tax Template", tpl):
+            doc.append("taxes", {"item_tax_template": tpl})
+
+    doc.insert() if creating else doc.save()
+    frappe.db.commit()
     return doc.name
 
 
@@ -1224,6 +1489,9 @@ _CAP_APPROVE_ROLES = {"Material Request Approval", "PO Approver"}
 _CAP_PO_BROWSE_ROLES = {"Purchase Officer", "PO Approver"}
 _CAP_PR_BROWSE_ROLES = {"Purchase Officer", "PO Approver", "Supervisor"}
 _CAP_STOCK_ROLES = {"Stock User", "Stock Manager"}
+# Reports (web-only) — gated to this role plus admins. Holders also see full
+# report/dashboard data (Report Viewer is privileged in get_dashboard_scope).
+_CAP_REPORTS_ROLES = {"Report Viewer"}
 
 
 @frappe.whitelist()
@@ -1245,7 +1513,239 @@ def capabilities():
         "read_pr": has(_CAP_PR_BROWSE_ROLES),
         "read_stock": has(_CAP_STOCK_ROLES),
         "approve": has(_CAP_APPROVE_ROLES),
+        "reports": has(_CAP_REPORTS_ROLES),
+        "manage_users": bool(roles & _USER_ADMIN_ROLES) or USER_MANAGER_ROLE in roles,
+        "email_configured": _email_configured(),
     }
+
+
+def _require_reports():
+    """Backend gate for the Reports endpoints — admins or Report Viewer only."""
+    roles = set(frappe.get_roles())
+    if not (roles & _CAP_ADMIN_ROLES or roles & _CAP_REPORTS_ROLES):
+        frappe.throw(_("You do not have access to reports."), frappe.PermissionError)
+
+
+# ===========================================================================
+# Users & Roles management (Settings → Users tab)
+# ===========================================================================
+# Account administration is kept separate from business roles: only true platform
+# admins OR a delegated "User Manager" may manage users. The set of roles this
+# screen can grant is a fixed allowlist — it can NEVER hand out System Manager /
+# Administrator. The full-access "Purchase Manager" role is grantable by platform
+# admins only (a delegated User Manager cannot escalate someone to full access).
+_USER_ADMIN_ROLES = {"Administrator", "System Manager"}
+USER_MANAGER_ROLE = "User Manager"
+
+# (raw role name, friendly label, plain-words description) — also the display order.
+_MANAGEABLE_ROLES = [
+    ("Material Request Creator", "Request Creator", "Raise material / purchase requests."),
+    ("Material Request Approval", "Request Approver", "Approve material requests."),
+    ("Purchase User", "Purchase User", "Raise requests and make goods receipts."),
+    ("Purchase Officer", "Purchase Officer", "Requests, browse POs & receipts, make receipts."),
+    ("PO Approver", "PO Approver", "Approve purchase orders; browse POs & receipts."),
+    ("Supervisor", "Site Supervisor", "Mobile app; can be a PO receiver and receive material."),
+    ("Report Viewer", "Report Viewer", "Access reports & dashboards (full data)."),
+    ("Accounts User", "Accounts / Payments User", "Record and view payments."),
+    ("Purchase Manager", "Purchase Manager — full access", "FULL access to everything in the app. Grant sparingly."),
+]
+_MANAGEABLE_ROLE_NAMES = {r[0] for r in _MANAGEABLE_ROLES}
+# Powerful roles only a platform admin may grant (delegated User Managers cannot).
+_ELEVATED_ROLES = {"Purchase Manager"}
+
+
+def _is_user_admin():
+    return bool(set(frappe.get_roles()) & _USER_ADMIN_ROLES)
+
+
+def _can_manage_users():
+    roles = set(frappe.get_roles())
+    return bool(roles & _USER_ADMIN_ROLES) or USER_MANAGER_ROLE in roles
+
+
+def _require_user_manager():
+    if not _can_manage_users():
+        frappe.throw(_("You do not have access to manage users."), frappe.PermissionError)
+
+
+def _email_configured():
+    """True only if a working default-outgoing email account exists (enabled, not
+    awaiting a password, and with auth credentials present) — so the UI offers the
+    'email a set-password link' option ONLY when it can actually send."""
+    try:
+        acc = frappe.get_all(
+            "Email Account",
+            filters={"enable_outgoing": 1, "default_outgoing": 1, "awaiting_password": 0},
+            fields=["name", "no_smtp_authentication", "login_id", "email_id"],
+            limit_page_length=1,
+        )
+        if not acc:
+            return False
+        a = acc[0]
+        if a.get("no_smtp_authentication"):
+            return True
+        return bool(frappe.db.get_value("Email Account", a["name"], "password")) and bool(a.get("login_id") or a.get("email_id"))
+    except Exception:
+        return False
+
+
+def _grantable_roles():
+    """Roles the CURRENT caller may grant: the full allowlist for platform admins,
+    minus the elevated (full-access) roles for delegated User Managers."""
+    names = set(_MANAGEABLE_ROLE_NAMES)
+    return names if _is_user_admin() else (names - _ELEVATED_ROLES)
+
+
+def _validate_roles(roles):
+    roles = [r for r in (roles or []) if r]
+    bad = set(roles) - _grantable_roles()
+    if bad:
+        frappe.throw(_("You cannot assign these roles: {0}").format(", ".join(sorted(bad))))
+    return roles
+
+
+@frappe.whitelist()
+def assignable_roles():
+    """Roles the current caller may assign (label + description), for the Users UI."""
+    _require_user_manager()
+    grantable = _grantable_roles()
+    return [
+        {"role": name, "label": label, "description": desc}
+        for (name, label, desc) in _MANAGEABLE_ROLES
+        if name in grantable
+    ]
+
+
+@frappe.whitelist()
+def users_list():
+    """Staff users with their manageable roles + status, for the Users & Roles table."""
+    _require_user_manager()
+    out = []
+    for u in frappe.get_all(
+        "User",
+        filters={"user_type": "System User"},
+        fields=["name", "full_name", "email", "mobile_no", "enabled"],
+        order_by="full_name",
+        limit_page_length=0,
+    ):
+        if u.name in ("Administrator", "Guest"):
+            continue
+        roles = set(frappe.get_roles(u.name))
+        u["roles"] = [name for (name, _l, _d) in _MANAGEABLE_ROLES if name in roles]
+        u["is_admin"] = bool(roles & _USER_ADMIN_ROLES)
+        out.append(u)
+    return out
+
+
+@frappe.whitelist()
+def create_user(data):
+    """Create a System User with the chosen manageable roles. Password is handled
+    either by a welcome email (self-service set-password link) or an admin-set
+    temporary password — the caller chooses."""
+    _require_user_manager()
+    data = _loads(data)
+    email = (data.get("email") or "").strip().lower()
+    first_name = (data.get("full_name") or "").strip()
+    if not email:
+        frappe.throw(_("Email is required."))
+    if not first_name:
+        frappe.throw(_("Name is required."))
+    if frappe.db.exists("User", email):
+        frappe.throw(_("A user with this email already exists."))
+    roles = _validate_roles(data.get("roles"))
+    welcome = bool(data.get("send_welcome_email"))
+    temp_password = data.get("password") or None
+
+    doc = frappe.new_doc("User")
+    doc.email = email
+    doc.first_name = first_name
+    doc.mobile_no = (data.get("mobile_no") or "").strip() or None
+    doc.enabled = 1
+    doc.user_type = "System User"
+    doc.send_welcome_email = 1 if welcome else 0
+    doc.flags.no_welcome_mail = not welcome
+    if not welcome and temp_password:
+        doc.new_password = temp_password
+    try:
+        doc.insert(ignore_permissions=True)
+    except frappe.OutgoingEmailError:
+        # User row is created; only the welcome email failed — don't fail the call.
+        frappe.clear_last_message()
+    if roles:
+        doc.add_roles(*roles)
+    frappe.db.commit()
+    return {"name": doc.name}
+
+
+@frappe.whitelist()
+def update_user(data):
+    """Update a user's manageable roles and/or enabled state. A caller cannot edit
+    their own account, and only a platform admin may manage an admin account."""
+    _require_user_manager()
+    data = _loads(data)
+    user = (data.get("user") or "").strip().lower()
+    if not user or not frappe.db.exists("User", user):
+        frappe.throw(_("User not found."))
+    if user in ("administrator", "guest"):
+        frappe.throw(_("This account cannot be managed here."))
+    if user == frappe.session.user:
+        frappe.throw(_("You cannot change your own account."))
+    if (set(frappe.get_roles(user)) & _USER_ADMIN_ROLES) and not _is_user_admin():
+        frappe.throw(_("Only a platform admin can manage an administrator account."))
+
+    simple = {}
+    if "enabled" in data:
+        simple["enabled"] = 1 if data.get("enabled") else 0
+    if "mobile_no" in data:
+        simple["mobile_no"] = (data.get("mobile_no") or "").strip() or None
+    if simple:
+        frappe.db.set_value("User", user, simple)
+
+    if "roles" in data:
+        want = set(_validate_roles(data.get("roles")))
+        grantable = _grantable_roles()
+        # Only touch roles within the caller's grant set; leave others untouched.
+        current_managed = set(frappe.get_roles(user)) & grantable
+        doc = frappe.get_doc("User", user)
+        to_add = want - current_managed
+        to_remove = current_managed - want
+        if to_add:
+            doc.add_roles(*to_add)
+        if to_remove:
+            doc.remove_roles(*to_remove)
+    frappe.db.commit()
+    return {"name": user}
+
+
+@frappe.whitelist()
+def reset_user_password(data):
+    """Reset a user's password: set a new temporary password to share, or (only if
+    email is configured) email them a set-password link. Admin / User Manager only;
+    cannot reset an admin account unless you are a platform admin."""
+    _require_user_manager()
+    data = _loads(data)
+    user = (data.get("user") or "").strip().lower()
+    if not user or not frappe.db.exists("User", user):
+        frappe.throw(_("User not found."))
+    if user in ("administrator", "guest"):
+        frappe.throw(_("This account cannot be managed here."))
+    if (set(frappe.get_roles(user)) & _USER_ADMIN_ROLES) and not _is_user_admin():
+        frappe.throw(_("Only a platform admin can reset an administrator's password."))
+
+    if data.get("send_email"):
+        if not _email_configured():
+            frappe.throw(_("Email is not configured on this site."))
+        frappe.get_doc("User", user).reset_password(send_email=True)
+        return {"ok": True, "emailed": True}
+
+    pwd = (data.get("password") or "").strip()
+    if not pwd:
+        frappe.throw(_("Enter a new temporary password."))
+    from frappe.utils.password import update_password
+
+    update_password(user, pwd)
+    frappe.db.commit()
+    return {"ok": True}
 
 
 @frappe.whitelist()
@@ -1702,12 +2202,14 @@ _REPORTS["supplier-statement"] = (_rb_supplier_statement, [
 @frappe.whitelist()
 def report_items():
     """Item options for report pickers (Item Price Comparison)."""
+    _require_reports()
     return frappe.get_all("Item", filters={"disabled": 0}, fields=["name", "item_name"],
                           order_by="item_name", limit_page_length=0)
 
 
 @frappe.whitelist()
 def report_data(report, limit=500, start=0, **kwargs):
+    _require_reports()
     if report not in _REPORTS:
         frappe.throw(_("Unknown report: {0}").format(report))
     builder, cols = _REPORTS[report]
@@ -1720,6 +2222,7 @@ def report_data(report, limit=500, start=0, **kwargs):
 
 @frappe.whitelist()
 def export_report_xlsx(report, **kwargs):
+    _require_reports()
     if report not in _REPORTS:
         frappe.throw(_("Unknown report: {0}").format(report))
     from frappe.utils.xlsxutils import make_xlsx
@@ -1745,6 +2248,7 @@ def export_report_xlsx(report, **kwargs):
 
 @frappe.whitelist()
 def export_report_pdf(report, **kwargs):
+    _require_reports()
     if report not in _REPORTS:
         frappe.throw(_("Unknown report: {0}").format(report))
     from frappe.utils.pdf import get_pdf

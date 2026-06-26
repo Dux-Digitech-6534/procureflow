@@ -4,6 +4,7 @@ import { FrappeProvider, useFrappeAuth } from 'frappe-react-sdk';
 import { ThemeProvider } from './lib/theme';
 import { ToastProvider } from './components/Toast';
 import { AppShell } from './components/AppShell';
+import { RequireReports } from './components/RequireReports';
 import { Dashboard } from './pages/Dashboard';
 import { Reports } from './pages/Reports';
 import { MaterialRequests } from './pages/MaterialRequests';
@@ -81,8 +82,8 @@ export default function App() {
 									<Route path="receipts/:id" element={<ReceiptDetail />} />
 									<Route path="payments" element={<Payments />} />
 									<Route path="payments/:id" element={<PaymentDetail />} />
-									<Route path="reports" element={<Reports />} />
-									<Route path="reports/:slug" element={<Reports />} />
+									<Route path="reports" element={<RequireReports><Reports /></RequireReports>} />
+									<Route path="reports/:slug" element={<RequireReports><Reports /></RequireReports>} />
 									<Route path="settings" element={<Settings />} />
 									<Route path="*" element={<Placeholder title="Not found" eyebrow="404" />} />
 								</Route>

@@ -19,6 +19,7 @@ import { Field, SelectInput, SearchSelect, TextArea } from '../components/form';
 import { Icon } from '../components/Icon';
 import { DocLifecycleActions } from '../components/DocLifecycleActions';
 import { LinkedDocs } from '../components/LinkedDocs';
+import { CreateItemModal } from '../components/CreateItemModal';
 import { useToast } from '../components/Toast';
 import { parseServerError } from '../lib/format';
 
@@ -149,6 +150,15 @@ export function NewMaterialRequest() {
 			},
 		]);
 	}
+	const [itemModal, setItemModal] = useState(false);
+	const [pendingAdd, setPendingAdd] = useState<string | null>(null);
+	useEffect(() => {
+		if (pendingAdd && itemOptions.some((o) => o.value === pendingAdd)) {
+			addItem(pendingAdd);
+			setPendingAdd(null);
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [pendingAdd, itemsRes.data]);
 	function setLine(i: number, patch: Partial<LineRow>) {
 		setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
 	}
@@ -224,8 +234,11 @@ export function NewMaterialRequest() {
 			// so the state/buttons update without a manual refresh; a new request
 			// changes the route, which refetches.
 			if (isEdit && newName === id) {
-				setSeeded(false);
+				// Revalidate FIRST so the cache holds the freshly-saved doc, THEN drop the
+				// seed guard so the seed effect re-runs against the NEW data. Doing it the
+				// other way round re-seeds from the STALE cache (items lagged one save behind).
 				await detailRes.mutate();
+				setSeeded(false);
 			} else {
 				navigate('/material-requests/' + newName);
 			}
@@ -429,6 +442,8 @@ export function NewMaterialRequest() {
 									disabled={!category}
 									placeholder={category ? 'Search and add an item…' : 'Pick a category first'}
 									options={pickerOptions}
+									onCreate={category ? () => setItemModal(true) : undefined}
+									createLabel="New item"
 								/>
 							</div>
 						)}
@@ -562,6 +577,13 @@ export function NewMaterialRequest() {
 					</section>
 
 					{isEdit && detail && <LinkedDocs doctype="Material Request" name={detail.name} />}
+					{itemModal && (
+						<CreateItemModal
+							category={category}
+							onClose={() => setItemModal(false)}
+							onCreated={async (code) => { setItemModal(false); await itemsRes.mutate(); setPendingAdd(code); }}
+						/>
+					)}
 
 					<section className="card twk">
 						<div className="chead">
