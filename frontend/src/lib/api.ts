@@ -39,6 +39,9 @@ export const API = {
 	createUser: 'procureflow.react_api.create_user',
 	updateUser: 'procureflow.react_api.update_user',
 	resetUserPassword: 'procureflow.react_api.reset_user_password',
+	getTolerance: 'procureflow.react_api.get_tolerance',
+	saveTolerance: 'procureflow.react_api.save_tolerance',
+	docActivity: 'procureflow.react_api.doc_activity',
 	userInfo: 'procureflow.react_api.user_info',
 	capabilities: 'procureflow.react_api.capabilities',
 	notifications: 'procureflow.react_api.notifications',
@@ -210,6 +213,9 @@ export interface MrListRow {
 	transaction_date: string | null;
 	schedule_date: string | null;
 	owner: string;
+	per_ordered: number | null;
+	per_received: number | null;
+	had_cancelled_order: boolean;
 	items: number;
 	actions?: string[];
 }
@@ -245,6 +251,9 @@ export interface MrDetail extends DocActionState {
 	status: string | null;
 	docstatus: number;
 	owner: string;
+	per_ordered: number | null;
+	per_received: number | null;
+	had_cancelled_order: boolean;
 	attachment: string | null;
 	items: MrLine[];
 	can_create_po: boolean;
@@ -299,6 +308,7 @@ export function mrDisplayStatus(r: {
 	workflow_state?: string | null;
 	status?: string | null;
 	docstatus?: number;
+	had_cancelled_order?: boolean;
 }): DisplayStatus {
 	if (r.docstatus === 2 || r.status === 'Cancelled') return { label: 'Cancelled', tone: 'err' };
 	if (r.status === 'Stopped') return { label: 'Stopped', tone: 'neutral' };
@@ -312,8 +322,11 @@ export function mrDisplayStatus(r: {
 				return { label: 'Ordered', tone: 'pend' };
 			case 'Partially Ordered':
 				return { label: 'Partially ordered', tone: 'pend' };
-			default: // "Pending" = approved, nothing ordered yet
-				return { label: 'Approved', tone: 'ok' };
+			default: // "Pending" = approved, nothing currently ordered
+				// If a PO was placed then cancelled, don't show a fresh green "Approved".
+				return r.had_cancelled_order
+					? { label: 'Order cancelled', tone: 'neutral' }
+					: { label: 'Approved', tone: 'ok' };
 		}
 	}
 	if (r.workflow_state === 'Rejected') return { label: 'Rejected', tone: 'err' };
@@ -379,6 +392,7 @@ export interface PoListRow {
 	grand_total: number | null;
 	transaction_date: string | null;
 	schedule_date: string | null;
+	custom_rejection_remark: string | null;
 	items: number;
 	actions?: string[];
 }
@@ -416,6 +430,7 @@ export interface PoDetail extends DocActionState {
 	company: string | null;
 	tax_type: string | null;
 	remark: string | null;
+	rejection_remark: string | null;
 	terms: string | null;
 	receiver: string | null;
 	receiver_name: string | null;
@@ -505,13 +520,40 @@ export interface PoReceiptItem {
 	ordered: number;
 	received: number;
 	pending: number;
+	max_qty: number;
 }
 
 export interface PoReceiptItems {
 	supplier: string;
 	supplier_name: string | null;
 	project: string | null;
+	tolerance_pct: number;
 	items: PoReceiptItem[];
+}
+
+export interface Tolerance {
+	enabled: boolean;
+	pct: number;
+	can_edit: boolean;
+}
+
+export interface ActivityChange {
+	label: string;
+	from: string | null;
+	to: string | null;
+}
+export interface ActivityEntry {
+	when: string;
+	who: string;
+	kind: 'created' | 'edit' | 'workflow' | 'submitted' | 'cancelled';
+	changes: ActivityChange[];
+}
+export interface DocActivity {
+	created_on: string;
+	created_by: string;
+	modified_on: string;
+	modified_by: string;
+	entries: ActivityEntry[];
 }
 
 export interface PrListRow {

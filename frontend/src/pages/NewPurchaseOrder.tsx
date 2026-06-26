@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
+import { useFrappeFileUpload, useFrappeGetCall, useFrappePostCall, useFrappeUpdateDoc } from 'frappe-react-sdk';
 import {
 	API,
 	poDisplayStatus,
@@ -15,6 +15,7 @@ import { Field, SelectInput, SearchSelect, TextArea } from '../components/form';
 import { Icon } from '../components/Icon';
 import { DocLifecycleActions } from '../components/DocLifecycleActions';
 import { LinkedDocs } from '../components/LinkedDocs';
+import { DocActivity } from '../components/DocActivity';
 import { CreateSupplierModal } from '../components/CreateSupplierModal';
 import { CreateItemModal } from '../components/CreateItemModal';
 import { useToast } from '../components/Toast';
@@ -102,6 +103,25 @@ export function NewPurchaseOrder() {
 	const [requesters, setRequesters] = useState<string[]>([]);
 	const [terms, setTerms] = useState('');
 	const [termsSeeded, setTermsSeeded] = useState(false);
+	const { upload, loading: uploading } = useFrappeFileUpload();
+	const { updateDoc } = useFrappeUpdateDoc();
+	const fileRef = useRef<HTMLInputElement>(null);
+	const [attachment, setAttachment] = useState<string | null>(null);
+	const [pendingFile, setPendingFile] = useState<File | null>(null);
+
+	async function uploadTo(name: string, file: File) {
+		const res = await upload(file, { doctype: 'Purchase Order', docname: name, fieldname: 'custom_add_receipt', isPrivate: true });
+		await updateDoc('Purchase Order', name, { custom_add_receipt: res.file_url });
+		return res.file_url;
+	}
+	function onPickFile(file: File) {
+		setErr('');
+		if (id) {
+			uploadTo(id, file).then((url) => setAttachment(url)).catch((e) => setErr(parseServerError(e)));
+		} else {
+			setPendingFile(file); // staged — uploaded right after the first save
+		}
+	}
 	const [lines, setLines] = useState<Line[]>([]);
 	const [err, setErr] = useState('');
 	const [seeded, setSeeded] = useState(false);
@@ -138,6 +158,7 @@ export function NewPurchaseOrder() {
 			setRemark(detail.remark ?? '');
 			setReceiver(detail.receiver ?? '');
 			setRequesters(detail.requesters ?? []);
+			setAttachment(detail.attachment ?? null);
 			setLines(
 				detail.items.map((it) => ({
 					item_code: it.item_code,
@@ -398,21 +419,50 @@ export function NewPurchaseOrder() {
 				})),
 			};
 			const res = await savePo({ data: payload });
+			const newName = res.message.name;
 			const st = res.message.workflow_state;
 			toast.success(st === 'Approved' ? 'Purchase order placed' : st === 'Pending' ? 'Sent for approval' : 'Draft saved');
-			// When editing an existing PO we stay on the same URL, so React Router
-			// won't refetch — revalidate the detail so the new workflow state (e.g.
-			// Draft -> Approved after "Place order") and its buttons update without a
-			// manual refresh. A brand-new PO changes the route, which refetches.
-			if (isEdit && res.message.name === id) {
-				// Revalidate FIRST so the cache holds the freshly-saved doc, THEN drop the
-				// seed guards so the seed effects re-run against the NEW data — not the
-				// stale cache (which caused the items to lag one save behind).
-				await detailRes.mutate();
-				setSeeded(false);
-				setTermsSeeded(false);
+			// Upload a staged attachment now that the new PO exists.
+			if (pendingFile && !id) {
+				try {
+					const url = await uploadTo(newName, pendingFile);
+					setAttachment(url);
+				} catch (e) {
+					console.error(e);
+				}
+				setPendingFile(null);
+			}
+			// Editing in place: revalidate, then re-seed ONLY the items (which the
+			// backend rebuilds) + attachment from the fresh doc. Do NOT re-run the full
+			// seed — that overwrote header fields the user set (e.g. snapped Required-by
+			// back to today). A brand-new PO changes route and refetches.
+			if (isEdit && newName === id) {
+				const fresh = await detailRes.mutate();
+				const d = fresh?.message;
+				if (d) {
+					setLines(
+						d.items.map((it) => ({
+							item_code: it.item_code,
+							item_name: it.item_name,
+							uom: it.uom,
+							uoms: it.uoms ?? [{ uom: it.uom, conversion_factor: 1 }],
+							sub_category: it.sub_category,
+							category: it.category,
+							qty: String(it.qty ?? ''),
+							rate: String(it.rate ?? ''),
+							gst: it.gst_percent != null ? String(it.gst_percent) : '',
+							rwt: it.rate_with_tax != null ? String(it.rate_with_tax) : '',
+							specification: it.specification ?? '',
+							remark: it.remark ?? '',
+							schedule_date: it.schedule_date ?? '',
+							material_request: it.material_request ?? null,
+							material_request_item: it.material_request_item ?? null,
+						})),
+					);
+					setAttachment(d.attachment ?? null);
+				}
 			} else {
-				navigate('/purchase-orders/' + res.message.name);
+				navigate('/purchase-orders/' + newName);
 			}
 		} catch (e) {
 			setErr(parseServerError(e));
@@ -461,6 +511,12 @@ export function NewPurchaseOrder() {
 					{detail && (
 						<div style={{ marginTop: 8 }}>
 							<span className={'tag ' + poDisplayStatus(detail).tone}>{poDisplayStatus(detail).label}</span>
+						</div>
+					)}
+					{detail && detail.workflow_state === 'Rejected' && detail.rejection_remark && (
+						<div className="alert" style={{ marginTop: 10 }}>
+							<Icon name="warning" size={16} />
+							<span><b>Rejected.</b> {detail.rejection_remark}</span>
 						</div>
 					)}
 					{sourceMrs.length > 0 && (
@@ -676,6 +732,38 @@ export function NewPurchaseOrder() {
 								<TextArea value={remark} onChange={setRemark} rows={2} disabled={readOnly} placeholder="Header note…" />
 							</Field>
 						</div>
+						<div className="span2">
+							<div className="field">
+								<span className="flabel">Attachment</span>
+								<input
+									ref={fileRef}
+									type="file"
+									style={{ display: 'none' }}
+									onChange={(e) => {
+										const f = e.target.files?.[0];
+										e.target.value = '';
+										if (f) onPickFile(f);
+									}}
+								/>
+								<div className={'upload' + (readOnly ? ' disabled' : '')} onClick={() => !readOnly && fileRef.current?.click()}>
+									<Icon name="download" size={20} style={{ transform: 'rotate(180deg)' }} />
+									<div>
+										{attachment ? (
+											<a href={attachment} target="_blank" rel="noreferrer" style={{ color: 'var(--iris)' }}>View attached file</a>
+										) : pendingFile ? (
+											<span><b>{pendingFile.name}</b> <span className="dim">— attaches on save</span></span>
+										) : uploading ? (
+											'Uploading…'
+										) : readOnly ? (
+											<span className="dim">No attachment.</span>
+										) : (
+											<span>Drop a file or <span style={{ color: 'var(--iris)', fontWeight: 500 }}>browse</span></span>
+										)}
+									</div>
+								</div>
+								<span className="fhint">PO scan, quotation, drawing — header level</span>
+							</div>
+						</div>
 					</div>
 				</section>
 
@@ -709,7 +797,7 @@ export function NewPurchaseOrder() {
 						<span>Rate (w/o tax)</span>
 						<span>GST %</span>
 						<span>Rate (w/ tax)</span>
-						<span className="r">Amount</span>
+						<span className="r">Amount (w/o tax)</span>
 						<span />
 					</div>
 					{lines.length === 0 && (
@@ -754,8 +842,13 @@ export function NewPurchaseOrder() {
 									<input className="inp mono" value={isNoGst ? l.rate : l.rwt} disabled={readOnly || isNoGst} inputMode="decimal" placeholder="0.00" onChange={(e) => setLineCalc(i, 'rwt', e.target.value)} />
 								</div>
 								<div className="lf">
-									<span className="lfl">Amount</span>
-									<span className="amt">{fmtMoney(num(l.qty) * num(l.rate), 'INR')}</span>
+									<span className="lfl">Amount (w/o tax)</span>
+									<div className="amtwrap">
+										<span className="amt">{fmtMoney(num(l.qty) * num(l.rate), 'INR')}</span>
+										{!isNoGst && num(l.gst) > 0 && (
+											<span className="amtincl">incl. {fmtMoney(num(l.qty) * (num(l.rwt) || num(l.rate) * (1 + num(l.gst) / 100)), 'INR')}</span>
+										)}
+									</div>
 								</div>
 								{!readOnly ? (
 									<button className="xbtn" onClick={() => removeLine(i)} aria-label="Remove">
@@ -834,6 +927,7 @@ export function NewPurchaseOrder() {
 				</section>
 
 					{isEdit && detail && <LinkedDocs doctype="Purchase Order" name={detail.name} />}
+					{isEdit && detail && <DocActivity doctype="Purchase Order" name={detail.name} />}
 				</div>
 			</div>
 			{supModal && (

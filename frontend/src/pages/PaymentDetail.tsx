@@ -5,6 +5,7 @@ import { fmtDateLong, fmtMoney } from '../lib/format';
 import { Icon } from '../components/Icon';
 import { Facts } from '../components/ui';
 import { LinkedDocs } from '../components/LinkedDocs';
+import { DocActivity } from '../components/DocActivity';
 
 export function PaymentDetail() {
 	const { id } = useParams();
@@ -68,6 +69,7 @@ export function PaymentDetail() {
 
 					<div className="stack">
 						<LinkedDocs doctype="Procureflow Payment Entry" name={d.name} />
+						<DocActivity doctype="Procureflow Payment Entry" name={d.name} />
 					</div>
 				</div>
 			)}

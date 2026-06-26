@@ -52,6 +52,7 @@ interface Line {
 	uom: string;
 	ordered: number;
 	pending: number;
+	max_qty: number;
 	qty: string;
 }
 
@@ -103,6 +104,7 @@ export function NewReceipt() {
 					uom: it.uom,
 					ordered: it.ordered,
 					pending: it.pending,
+					max_qty: it.max_qty ?? it.pending,
 					qty: String(it.pending),
 				})),
 			);
@@ -129,8 +131,8 @@ export function NewReceipt() {
 			.map((l) => ({ po_item: l.po_item, qty: Number(l.qty) || 0 }))
 			.filter((l) => l.qty > 0);
 		if (items.length === 0) return setErr('Enter a received quantity for at least one item.');
-		if (lines.some((l) => Number(l.qty) > l.pending))
-			return setErr('Received quantity cannot exceed the pending quantity.');
+		if (lines.some((l) => Number(l.qty) > l.max_qty + 1e-6))
+			return setErr('Received quantity exceeds the allowed quantity (including any over-receipt tolerance).');
 		try {
 			// Upload the receipt images first (private + unattached); the backend
 			// sets them on the PR before insert and attaches them to the receipt.

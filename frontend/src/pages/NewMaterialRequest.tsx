@@ -19,6 +19,7 @@ import { Field, SelectInput, SearchSelect, TextArea } from '../components/form';
 import { Icon } from '../components/Icon';
 import { DocLifecycleActions } from '../components/DocLifecycleActions';
 import { LinkedDocs } from '../components/LinkedDocs';
+import { DocActivity } from '../components/DocActivity';
 import { CreateItemModal } from '../components/CreateItemModal';
 import { useToast } from '../components/Toast';
 import { parseServerError } from '../lib/format';
@@ -223,22 +224,37 @@ export function NewMaterialRequest() {
 			toast.success(res.message.workflow_state === 'Pending Approval' ? 'Material request submitted for approval' : 'Draft saved');
 			if (pendingFile && !id) {
 				try {
-					await uploadTo(newName, pendingFile);
+					const url = await uploadTo(newName, pendingFile);
+					setAttachment(url); // keep the just-uploaded file visible
 				} catch (e) {
 					/* non-fatal — the MR is saved; surface but still navigate */
 					console.error(e);
 				}
 				setPendingFile(null);
 			}
-			// Editing an existing request stays on the same URL — revalidate in place
-			// so the state/buttons update without a manual refresh; a new request
-			// changes the route, which refetches.
+			// Editing an existing request stays on the same URL. Revalidate, then
+			// re-seed ONLY the items (the part the backend rebuilds) from the fresh
+			// doc — do NOT re-run the full seed, which would overwrite header fields
+			// the user just set (e.g. snap Required-by back to today).
 			if (isEdit && newName === id) {
-				// Revalidate FIRST so the cache holds the freshly-saved doc, THEN drop the
-				// seed guard so the seed effect re-runs against the NEW data. Doing it the
-				// other way round re-seeds from the STALE cache (items lagged one save behind).
-				await detailRes.mutate();
-				setSeeded(false);
+				const fresh = await detailRes.mutate();
+				const d = fresh?.message;
+				if (d) {
+					setLines(
+						d.items.map((it) => ({
+							item_code: it.item_code,
+							item_name: it.item_name,
+							uom: it.uom,
+							uoms: it.uoms ?? [{ uom: it.uom, conversion_factor: 1 }],
+							sub_category: it.sub_category,
+							qty: String(it.qty ?? ''),
+							specification: it.specification ?? '',
+							remark: it.remark ?? '',
+							schedule_date: it.schedule_date ?? '',
+						})),
+					);
+					setAttachment(d.attachment ?? null);
+				}
 			} else {
 				navigate('/material-requests/' + newName);
 			}
@@ -577,6 +593,7 @@ export function NewMaterialRequest() {
 					</section>
 
 					{isEdit && detail && <LinkedDocs doctype="Material Request" name={detail.name} />}
+					{isEdit && detail && <DocActivity doctype="Material Request" name={detail.name} />}
 					{itemModal && (
 						<CreateItemModal
 							category={category}

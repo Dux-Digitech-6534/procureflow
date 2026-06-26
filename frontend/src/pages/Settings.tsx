@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useFrappeCreateDoc, useFrappeGetCall, useFrappeGetDoc, useFrappeGetDocList, useFrappePostCall } from 'frappe-react-sdk';
-import { API, type AssignableRole, type Capabilities, type ManagedUser } from '../lib/api';
+import { API, type AssignableRole, type Capabilities, type ManagedUser, type Tolerance } from '../lib/api';
 import { Card, CHead, EmptyMsg, Modal } from '../components/ui';
 import { Field, SearchSelect, SelectInput, TextArea, TextInput } from '../components/form';
 import { Icon, type IconName } from '../components/Icon';
@@ -880,6 +880,66 @@ function PoTermsPanel() {
 	);
 }
 
+function ReceiptTolerancePanel() {
+	const { data, mutate } = useFrappeGetCall<{ message: Tolerance }>(API.getTolerance, {});
+	const { call: saveCall, loading } = useFrappePostCall<{ message: { enabled: boolean; pct: number } }>(API.saveTolerance);
+	const toast = useToast();
+	const canEdit = data?.message?.can_edit ?? false;
+	const [enabled, setEnabled] = useState(false);
+	const [pct, setPct] = useState('5');
+	const [seeded, setSeeded] = useState(false);
+	const [err, setErr] = useState('');
+
+	useEffect(() => {
+		if (data?.message && !seeded) {
+			setEnabled(!!data.message.enabled);
+			setPct(String(data.message.pct ?? 0));
+			setSeeded(true);
+		}
+	}, [data, seeded]);
+
+	async function save() {
+		setErr('');
+		try {
+			const r = await saveCall({ enabled, pct: Number(pct) || 0 });
+			setEnabled(!!r.message.enabled);
+			setPct(String(r.message.pct ?? 0));
+			toast.success('Tolerance saved');
+			mutate();
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
+	return (
+		<Card>
+			<CHead icon="package" title="Over-receipt tolerance" action={canEdit ? undefined : <span className="dim" style={{ fontSize: 11.5 }}>read-only</span>} />
+			<div style={{ padding: '2px 2px 4px' }}>
+				<div className="sub" style={{ margin: '0 0 12px' }}>
+					Allow a goods receipt to accept slightly more than the ordered quantity — for when a little extra material arrives. Applies to every item.
+				</div>
+				<div className="formgrid">
+					<Field label="Allow over-receipt">
+						<SelectInput value={enabled ? '1' : '0'} onChange={(v) => setEnabled(v === '1')} disabled={!canEdit} options={[{ value: '0', label: 'Off' }, { value: '1', label: 'On' }]} />
+					</Field>
+					<Field label="Tolerance %" hint="0–100% over the ordered quantity">
+						<TextInput value={pct} onChange={setPct} disabled={!canEdit || !enabled} placeholder="5" />
+					</Field>
+				</div>
+				{canEdit && (
+					<div className="formfoot" style={{ marginTop: 12 }}>
+						{err && <span className="ferr">{err}</span>}
+						<span className="spacer" />
+						<button className="btn primary" disabled={loading} onClick={() => void save()}>
+							{loading ? 'Saving…' : 'Save tolerance'}
+						</button>
+					</div>
+				)}
+			</div>
+		</Card>
+	);
+}
+
 /* --------------------------------- Settings --------------------------------- */
 
 /* ------------------------------ Users & Roles ------------------------------- */
@@ -1194,7 +1254,12 @@ export function Settings() {
 						<StorePanel canCreate={allow('Warehouse')} />
 					</>
 				)}
-				{activeTab === 'documents' && <PoTermsPanel />}
+				{activeTab === 'documents' && (
+					<>
+						<PoTermsPanel />
+						<ReceiptTolerancePanel />
+					</>
+				)}
 				{activeTab === 'users' && canManageUsers && <UsersPanel />}
 			</div>
 

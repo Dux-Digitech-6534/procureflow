@@ -6,7 +6,9 @@ import { fmtDateLong, fmtMoney, fmtNum } from '../lib/format';
 import { Icon } from '../components/Icon';
 import { Facts } from '../components/ui';
 import { LinkedDocs } from '../components/LinkedDocs';
+import { DocActivity } from '../components/DocActivity';
 import { RecordPaymentModal } from '../components/RecordPaymentModal';
+import { Attachment } from '../components/Attachment';
 
 export function ReceiptDetail() {
 	const { id } = useParams();
@@ -112,10 +114,25 @@ export function ReceiptDetail() {
 								</table>
 							</div>
 						</section>
+
+						{(d.material_image || d.invoice_image) && (
+							<section className="card">
+								<div className="chead">
+									<Icon name="file-text" size={16} />
+									<span className="ttl">Attachments</span>
+								</div>
+								<div className="attach" style={{ padding: 12 }}>
+									{[d.material_image, d.invoice_image].filter(Boolean).map((url) => (
+										<Attachment key={url as string} url={url as string} label="Receipt photo" />
+									))}
+								</div>
+							</section>
+						)}
 					</div>
 
 					<div className="stack">
 						<LinkedDocs doctype="Purchase Receipt" name={d.name} />
+						<DocActivity doctype="Purchase Receipt" name={d.name} />
 					</div>
 				</div>
 			)}

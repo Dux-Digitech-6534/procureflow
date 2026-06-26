@@ -11,11 +11,12 @@ picker.
 import hashlib
 import hmac
 import json
+import re
 
 import frappe
 from frappe import _
 from frappe.model.workflow import apply_workflow, get_transitions
-from frappe.utils import flt, nowdate
+from frappe.utils import cint, flt, nowdate
 
 MR_TYPE = "Purchase"
 MR_PENDING_STATE = "Pending Approval"
@@ -320,12 +321,15 @@ def mr_list(search="", limit=100):
             "transaction_date",
             "schedule_date",
             "owner",
+            "per_ordered",
+            "per_received",
         ],
         order_by="modified desc",
         limit_page_length=int(limit),
     )
     names = [r.name for r in rows]
     counts = {}
+    cancelled_order = set()
     if names:
         for r in frappe.get_all(
             "Material Request Item",
@@ -334,6 +338,15 @@ def mr_list(search="", limit=100):
             limit_page_length=0,
         ):
             counts[r.parent] = counts.get(r.parent, 0) + 1
+        # MRs whose linked PO was cancelled (so the UI can show it distinctly,
+        # not as a fresh green "Approved" after the order was reverted).
+        for r in frappe.get_all(
+            "Purchase Order Item",
+            filters={"material_request": ["in", names], "docstatus": 2},
+            fields=["material_request"],
+            limit_page_length=0,
+        ):
+            cancelled_order.add(r.material_request)
     search = (search or "").strip().lower()
     out = []
     for r in rows:
@@ -342,6 +355,7 @@ def mr_list(search="", limit=100):
         ).lower():
             continue
         r["items"] = counts.get(r.name, 0)
+        r["had_cancelled_order"] = r.name in cancelled_order
         r["actions"] = _doc_actions("Material Request", r.name, r.workflow_state)
         out.append(r)
     return out
@@ -388,6 +402,15 @@ def mr_detail(name):
         "status": doc.status,
         "docstatus": doc.docstatus,
         "owner": doc.owner,
+        "per_ordered": doc.get("per_ordered"),
+        "per_received": doc.get("per_received"),
+        "had_cancelled_order": bool(
+            frappe.get_all(
+                "Purchase Order Item",
+                filters={"material_request": doc.name, "docstatus": 2},
+                limit_page_length=1,
+            )
+        ),
         "attachment": doc.get("custom_add_receipt"),
         "items": items,
         "can_create_po": can_create_po,
@@ -460,6 +483,160 @@ def save_po_terms(terms):
     doc.save(ignore_permissions=True)
     frappe.db.commit()
     return {"terms": doc.terms}
+
+
+TOLERANCE_DOCTYPE = "Purchase Receipt Tolerance Settings"
+
+
+def _is_platform_admin():
+    return bool(set(frappe.get_roles()) & {"Administrator", "System Manager"})
+
+
+@frappe.whitelist()
+def get_tolerance():
+    """Over-receipt tolerance settings for the Settings panel."""
+    return {
+        "enabled": bool(frappe.db.get_single_value(TOLERANCE_DOCTYPE, "enable_global_tolerance")),
+        "pct": flt(frappe.db.get_single_value(TOLERANCE_DOCTYPE, "global_tolerance_percentage")),
+        "can_edit": _is_platform_admin(),
+    }
+
+
+@frappe.whitelist()
+def save_tolerance(enabled, pct):
+    """Set the global over-receipt allowance. System-Manager only (it loosens
+    receipt validation)."""
+    if not _is_platform_admin():
+        frappe.throw(_("Only a System Manager can change the over-receipt tolerance."), frappe.PermissionError)
+    p = flt(pct)
+    if p < 0 or p > 100:
+        frappe.throw(_("Tolerance must be between 0 and 100%."))
+    doc = frappe.get_single(TOLERANCE_DOCTYPE)
+    doc.enable_global_tolerance = 1 if cint(enabled) else 0
+    doc.global_tolerance_percentage = p
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return {"enabled": bool(doc.enable_global_tolerance), "pct": flt(doc.global_tolerance_percentage)}
+
+
+# ===========================================================================
+# Activity / change history (audit trail) — reads ERPNext's Version records
+# ===========================================================================
+_ACTIVITY_DOCTYPES = {"Material Request", "Purchase Order", "Purchase Receipt", "Procureflow Payment Entry"}
+_ACTIVITY_SKIP = {
+    "modified", "modified_by", "creation", "owner", "_seen", "_comments", "_assign",
+    "_liked_by", "_user_tags", "naming_series", "idx", "lft", "rgt", "doctype",
+}
+# Derived / recomputed-on-save fields that add noise to the timeline.
+_ACTIVITY_NOISE = {
+    "in_words", "total_taxes_and_charges", "tax_amount", "tax_amount_after_discount_amount",
+    "item_wise_tax_detail", "item_tax_rate", "price_list_rate", "total", "net_total",
+    "rounding_adjustment", "outstanding_amount", "taxes_and_charges_added", "taxes_and_charges_deducted",
+    "other_charges_calculation", "custom_approved_by_signature", "custom_authorized_signature",
+    "custom_company_signature",
+}
+# Auto-managed child tables (rebuilt by the tax/payment engine on every save).
+_ACTIVITY_NOISE_TABLES = {"taxes", "payment_schedule"}
+
+
+def _skip_field(fn):
+    return (not fn) or fn in _ACTIVITY_SKIP or fn.startswith("base_") or fn in _ACTIVITY_NOISE
+
+
+def _skip_table(tbl):
+    return (not tbl) or tbl in _ACTIVITY_NOISE_TABLES or "tax" in tbl.lower()
+
+
+def _uname(user, cache):
+    if not user:
+        return ""
+    if user not in cache:
+        cache[user] = frappe.db.get_value("User", user, "full_name") or user
+    return cache[user]
+
+
+def _fmt_val(v):
+    if v is None or v == "":
+        return "—"
+    s = re.sub(r"<[^>]+>", " ", str(v))
+    s = re.sub(r"\s+", " ", s).strip()
+    if not s:
+        return "—"
+    return (s[:80] + "…") if len(s) > 80 else s
+
+
+@frappe.whitelist()
+def doc_activity(doctype, name):
+    """Created/edited audit trail for a document: who created it, who last changed
+    it, and a timeline of field-level changes parsed from ERPNext's Version log."""
+    if doctype not in _ACTIVITY_DOCTYPES:
+        frappe.throw(_("Activity is not available for this document."))
+    doc = frappe.get_doc(doctype, name)
+    doc.check_permission("read")
+    meta = frappe.get_meta(doctype)
+    cache = {}
+
+    def label(fn):
+        f = meta.get_field(fn)
+        return f.label if (f and f.label) else frappe.unscrub(fn or "")
+
+    entries = []
+    for v in frappe.get_all(
+        "Version",
+        filters={"ref_doctype": doctype, "docname": name},
+        fields=["owner", "creation", "data"],
+        order_by="creation asc",
+    ):
+        try:
+            j = json.loads(v.data or "{}")
+        except Exception:
+            j = {}
+        changes = []
+        kind = "edit"
+        for ch in j.get("changed", []) or []:
+            if not ch:
+                continue
+            fn = ch[0]
+            old = ch[1] if len(ch) > 1 else None
+            new = ch[2] if len(ch) > 2 else None
+            if _skip_field(fn):
+                continue
+            if fn == "docstatus":
+                kind = "submitted" if str(new) == "1" else ("cancelled" if str(new) == "2" else kind)
+                continue
+            if fn == "workflow_state" and kind == "edit":
+                kind = "workflow"
+            changes.append({"label": label(fn), "from": _fmt_val(old), "to": _fmt_val(new)})
+        for add in j.get("added", []) or []:
+            if add and not _skip_table(add[0]):
+                changes.append({"label": "Added a " + label(add[0]) + " row", "from": None, "to": None})
+        for rem in j.get("removed", []) or []:
+            if rem and not _skip_table(rem[0]):
+                changes.append({"label": "Removed a " + label(rem[0]) + " row", "from": None, "to": None})
+        for rc in j.get("row_changed", []) or []:
+            if rc and len(rc) >= 4 and not _skip_table(rc[0]):
+                for cf in rc[3] or []:
+                    if cf and not _skip_field(cf[0]):
+                        changes.append({
+                            "label": label(rc[0]) + " · " + frappe.unscrub(cf[0]),
+                            "from": _fmt_val(cf[1] if len(cf) > 1 else None),
+                            "to": _fmt_val(cf[2] if len(cf) > 2 else None),
+                        })
+        if not changes and kind == "edit":
+            continue  # version with only skipped/internal fields — not worth showing
+        entries.append({"when": str(v.creation), "who": _uname(v.owner, cache), "kind": kind, "changes": changes})
+
+    # Created event is the oldest — put it at the front so after reversing it ends
+    # up last (newest change at the top of the timeline).
+    entries.insert(0, {"when": str(doc.creation), "who": _uname(doc.owner, cache), "kind": "created", "changes": []})
+    entries.reverse()  # newest first
+    return {
+        "created_on": str(doc.creation),
+        "created_by": _uname(doc.owner, cache),
+        "modified_on": str(doc.modified),
+        "modified_by": _uname(doc.modified_by, cache),
+        "entries": entries,
+    }
 
 
 # Receiver = the mobile user assigned to receive a PO's material. The eligible pool
@@ -767,6 +944,7 @@ def po_list(limit=100):
             "grand_total",
             "transaction_date",
             "schedule_date",
+            "custom_rejection_remark",
         ],
         order_by="modified desc",
         limit_page_length=int(limit),
@@ -841,6 +1019,7 @@ def po_detail(name):
         "company": doc.get("custom_test_company_"),
         "tax_type": doc.get("custom_tax_type"),
         "remark": doc.custom_remark,
+        "rejection_remark": doc.get("custom_rejection_remark"),
         "terms": doc.get("terms"),
         "receiver": receiver,
         "receiver_name": recv.full_name if recv else None,
@@ -1008,15 +1187,30 @@ def receivable_pos():
     )
 
 
+def _receipt_tolerance_pct():
+    """Pre-decided over-receipt allowance (%) from Purchase Receipt Tolerance
+    Settings — 0 when global tolerance is disabled. Lets a receipt accept a bit
+    more than ordered (matches the purchase_receipt_tolerance app's enforcement)."""
+    try:
+        if frappe.db.get_single_value("Purchase Receipt Tolerance Settings", "enable_global_tolerance"):
+            return flt(frappe.db.get_single_value("Purchase Receipt Tolerance Settings", "global_tolerance_percentage"))
+    except Exception:
+        pass
+    return 0.0
+
+
 @frappe.whitelist()
 def po_receipt_items(purchase_order):
     doc = frappe.get_doc("Purchase Order", purchase_order)
     doc.check_permission("read")
     _guard_receiver(doc.name, doc.get("custom_receiver"))
+    pct = _receipt_tolerance_pct()
     items = []
     for it in doc.items:
         pending = flt(it.qty) - flt(it.received_qty)
         if pending > 0:
+            # Max this receipt may take = (ordered * (1 + tolerance%)) - already received.
+            max_qty = round(flt(it.qty) * (1 + pct / 100.0) - flt(it.received_qty), 3)
             items.append(
                 {
                     "po_item": it.name,
@@ -1026,9 +1220,16 @@ def po_receipt_items(purchase_order):
                     "ordered": it.qty,
                     "received": it.received_qty,
                     "pending": pending,
+                    "max_qty": max_qty,
                 }
             )
-    return {"supplier": doc.supplier, "supplier_name": doc.supplier_name, "project": doc.custom_project_name, "items": items}
+    return {
+        "supplier": doc.supplier,
+        "supplier_name": doc.supplier_name,
+        "project": doc.custom_project_name,
+        "tolerance_pct": pct,
+        "items": items,
+    }
 
 
 @frappe.whitelist()

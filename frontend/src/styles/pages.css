@@ -206,6 +206,21 @@
 	font-size: 12.5px;
 	color: var(--fg-1);
 }
+.poline .amtwrap {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	width: 100%;
+	gap: 1px;
+	line-height: 1.2;
+	min-width: 0;
+}
+.poline .amtincl {
+	font-family: var(--font-mono);
+	font-size: 9.5px;
+	color: var(--fg-3);
+	white-space: nowrap;
+}
 .pobot {
 	display: grid;
 	grid-template-columns: 1.3fr 1fr;
@@ -451,3 +466,44 @@ a.rcard:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(0,0,0,
 .credbox > div { display: flex; gap: 10px; font-size: 13px; }
 .credbox .ck { flex: 0 0 110px; color: var(--fg-2); }
 .credbox .cv { color: var(--fg-1); font-weight: 600; word-break: break-all; }
+
+/* =========================================================
+   Activity / History timeline (DocActivity)
+   ========================================================= */
+.actmeta { display: grid; gap: 4px; padding: 4px 2px 12px; }
+.actmeta > div { display: flex; gap: 10px; font-size: 12px; }
+.actmeta .k { flex: 0 0 78px; color: var(--fg-2); }
+.actmeta .v { color: var(--fg-1); font-weight: 500; }
+.timeline { position: relative; padding-left: 6px; }
+.tl-item { position: relative; display: flex; gap: 12px; padding: 0 0 14px 14px; }
+.tl-item:not(:last-child)::before {
+  content: ''; position: absolute; left: 4px; top: 12px; bottom: -2px;
+  width: 2px; background: var(--line, rgba(0,0,0,.10));
+}
+.tl-dot {
+  position: absolute; left: 0; top: 4px; width: 10px; height: 10px; border-radius: 999px;
+  background: var(--fg-2); box-shadow: 0 0 0 3px var(--surface-2, #fff);
+}
+.tl-dot.ok { background: var(--ok, #15916A); }
+.tl-dot.pend { background: #C68A1A; }
+.tl-dot.err { background: var(--err, #C0392B); }
+.tl-dot.neutral { background: var(--iris); }
+.tl-body { flex: 1; min-width: 0; }
+.tl-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tl-who { font-size: 12.5px; font-weight: 600; color: var(--fg-1); }
+.tl-when { font-size: 11px; color: var(--fg-2); }
+.tl-changes { margin-top: 5px; display: grid; gap: 3px; }
+.tl-change { font-size: 12px; display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.tl-change .cl { color: var(--fg-2); min-width: 90px; }
+.tl-change .cv { color: var(--fg-1); }
+.tl-change .old { color: var(--fg-2); text-decoration: line-through; }
+.tl-change .arr { color: var(--fg-3, #8A93A3); }
+.tl-change .new { color: var(--fg-1); font-weight: 500; }
+
+/* Collapsible card header (Activity) */
+.chead-toggle {
+	width: 100%; background: none; border: 0; cursor: pointer; text-align: left;
+	font: inherit; color: inherit;
+}
+.chead .chev { color: var(--fg-3); transition: transform .15s ease; transform: rotate(180deg); }
+.chead .chev.open { transform: rotate(270deg); }

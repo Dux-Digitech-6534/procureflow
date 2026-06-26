@@ -24,7 +24,13 @@ export function PurchaseOrders() {
 			sortValue: (r) => poDisplayStatus(r).label,
 			render: (r) => {
 				const s = poDisplayStatus(r);
-				return <span className={'tag ' + s.tone}>{s.label}</span>;
+				const rejected = s.label === 'Rejected' && r.custom_rejection_remark;
+				return (
+					<span title={rejected ? r.custom_rejection_remark ?? undefined : undefined}>
+						<span className={'tag ' + s.tone}>{s.label}</span>
+						{rejected && <div className="dim" style={{ marginTop: 4, fontSize: 11.5, maxWidth: 220, whiteSpace: 'normal' }}>{r.custom_rejection_remark}</div>}
+					</span>
+				);
 			},
 		},
 		{
