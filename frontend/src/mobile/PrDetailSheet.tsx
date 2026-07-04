@@ -12,7 +12,9 @@ export function PrDetailSheet({ name, onClose }: { name: string; onClose: () => 
 	const { t } = useLang();
 	const res = useFrappeGetCall<{ message: PrDetail }>(API.prDetail, { name });
 	const d = res.data?.message;
-	const photos = [d?.material_image, d?.invoice_image].filter(Boolean) as string[];
+	// ALL attachments — the two photo fields plus any plain file attachments
+	// (desk-created receipts attach files instead of filling the photo fields).
+	const photos = (d?.attachments?.length ? d.attachments : ([d?.material_image, d?.invoice_image].filter(Boolean) as string[]));
 
 	return (
 		<div className="mscope-sheet-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>

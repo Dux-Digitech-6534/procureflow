@@ -27,6 +27,7 @@ import { MApprovals } from './mobile/MApprovals';
 import { MReceipts } from './mobile/MReceipts';
 import { MReceive } from './mobile/MReceive';
 import { MPurchaseOrders } from './mobile/MPurchaseOrders';
+import { MNewPurchaseOrder } from './mobile/MNewPurchaseOrder';
 import { MPurchaseReceipts } from './mobile/MPurchaseReceipts';
 import { MProfile } from './mobile/MProfile';
 import { MNotifications } from './mobile/MNotifications';
@@ -58,10 +59,12 @@ export default function App() {
 									<Route index element={<MHome />} />
 									<Route path="requests" element={<MRequests />} />
 									<Route path="requests/new" element={<MNewRequest />} />
+									<Route path="requests/:name/edit" element={<MNewRequest />} />
 									<Route path="approvals" element={<MApprovals />} />
 									<Route path="receipts" element={<MReceipts />} />
 									<Route path="receipts/:po" element={<MReceive />} />
 									<Route path="orders" element={<MPurchaseOrders />} />
+								<Route path="orders/new" element={<MNewPurchaseOrder />} />
 									<Route path="receipt-history" element={<MPurchaseReceipts />} />
 									<Route path="profile" element={<MProfile />} />
 									<Route path="notifications" element={<MNotifications />} />

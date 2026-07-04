@@ -20,6 +20,7 @@ import { Icon } from '../components/Icon';
 import { DocLifecycleActions } from '../components/DocLifecycleActions';
 import { LinkedDocs } from '../components/LinkedDocs';
 import { DocActivity } from '../components/DocActivity';
+import { Attachment } from '../components/Attachment';
 import { CreateItemModal } from '../components/CreateItemModal';
 import { useToast } from '../components/Toast';
 import { parseServerError } from '../lib/format';
@@ -285,6 +286,12 @@ export function NewMaterialRequest() {
 							<span className={'tag ' + mrDisplayStatus(detail).tone}>{mrDisplayStatus(detail).label}</span>
 						</div>
 					)}
+					{detail && detail.workflow_state === 'Rejected' && detail.rejection_remark && (
+						<div className="alert" style={{ marginTop: 10 }}>
+							<Icon name="warning" size={16} />
+							<span><b>Rejected.</b> {detail.rejection_remark}</span>
+						</div>
+					)}
 				</div>
 				<div className="spacer" />
 				{/* New or Draft → Save draft + Submit for approval. Once it leaves Draft
@@ -318,6 +325,7 @@ export function NewMaterialRequest() {
 						transitions={detail.transitions}
 						canCancel={detail.can_cancel}
 						canAmend={detail.can_amend}
+						canDelete={detail.can_delete}
 						onChanged={() => void detailRes.mutate()}
 						basePath="/material-requests"
 					/>
@@ -418,14 +426,17 @@ export function NewMaterialRequest() {
 										onClick={() => !readOnly && fileRef.current?.click()}
 									>
 										<Icon name="download" size={20} style={{ transform: 'rotate(180deg)' }} />
-										<div>
+										<div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
 											{attachment ? (
-												<a href={attachment} target="_blank" rel="noreferrer" style={{ color: 'var(--iris)' }}>
-													View attached file
-												</a>
+												<span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-block', maxWidth: '100%' }}>
+													<Attachment url={attachment} label="Attachment" />
+												</span>
 											) : pendingFile ? (
-												<span>
-													<b>{pendingFile.name}</b> <span className="dim">— attaches on save</span>
+												<span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex', flexDirection: 'column', gap: 6, maxWidth: '100%' }}>
+													{pendingFile.type.startsWith('image/') && (
+														<img src={URL.createObjectURL(pendingFile)} alt={pendingFile.name} style={{ height: 88, width: 'auto', maxWidth: 160, borderRadius: 9, objectFit: 'cover' }} onLoad={(e) => URL.revokeObjectURL((e.target as HTMLImageElement).src)} />
+													)}
+													<span><b>{pendingFile.name}</b> <span className="dim">— attaches on save</span></span>
 												</span>
 											) : uploading ? (
 												'Uploading…'

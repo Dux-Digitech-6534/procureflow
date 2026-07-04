@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useFrappeFileUpload, useFrappeGetCall, useFrappePostCall, useFrappeUpdateDoc } from 'frappe-react-sdk';
-import { API, type MrContext, type ItemOption, type SaveMrResult, type UomOption } from '../lib/api';
+import { API, type MrContext, type ItemOption, type MrDetail, type SaveMrResult, type UomOption } from '../lib/api';
 import { Icon } from '../components/Icon';
 import { SearchSelect } from '../components/form';
 import { useToast } from '../components/Toast';
@@ -26,9 +26,14 @@ export function MNewRequest() {
 	const nav = useNavigate();
 	const toast = useToast();
 	const { t } = useLang();
+	// When a draft name is in the URL (/m/requests/:name/edit) we load it and edit in place.
+	const { name: editName } = useParams<{ name: string }>();
+	const isEdit = !!editName;
 
 	const ctxRes = useFrappeGetCall<{ message: MrContext }>(API.mrContext, {});
 	const ctx = ctxRes.data?.message;
+	// Load the existing draft when editing.
+	const editRes = useFrappeGetCall<{ message: MrDetail }>(API.mrDetail, { name: editName }, isEdit ? undefined : null);
 
 	const [category, setCategory] = useState('');
 	const [project, setProject] = useState('');
@@ -39,13 +44,48 @@ export function MNewRequest() {
 	const [lines, setLines] = useState<Line[]>([]);
 	const [photo, setPhoto] = useState<File | null>(null);
 	const [err, setErr] = useState('');
+	// Tracks whether the user has changed anything — so editing a loaded draft doesn't
+	// trigger the "leave without saving?" guard until they actually touch something.
+	const [touched, setTouched] = useState(false);
+	const [seeded, setSeeded] = useState(false);
 	const photoRef = useRef<HTMLInputElement>(null);
 
 	const { call: saveMr, loading: saving } = useFrappePostCall<{ message: SaveMrResult }>(API.saveMr);
 	const { upload, loading: uploading } = useFrappeFileUpload();
 	const { updateDoc } = useFrappeUpdateDoc();
 
-	const dirty = lines.length > 0 || !!category || !!remark || !!photo;
+	// Prefill the form from the loaded draft (once). Only drafts are editable;
+	// anything already submitted bounces back to the detail (save would be rejected).
+	useEffect(() => {
+		const d = editRes.data?.message;
+		if (!isEdit || !d || seeded) return;
+		if (d.docstatus !== 0) {
+			toast.error(t('nr.cannotEditSubmitted'));
+			nav('/m/requests', { replace: true });
+			return;
+		}
+		setCategory(d.category ?? '');
+		setProject(d.project ?? '');
+		setRequiredBy(d.schedule_date ?? '');
+		setPriority(d.priority ?? 'Medium');
+		setRemark(d.remark ?? '');
+		if (d.remark) setShowRemark(true);
+		setLines(
+			(d.items ?? []).map((it) => ({
+				item_code: it.item_code,
+				item_name: it.item_name,
+				uom: it.uom,
+				uoms: it.uoms?.length ? it.uoms : [{ uom: it.uom, conversion_factor: 1 }],
+				sub_category: it.sub_category,
+				qty: String(it.qty ?? ''),
+				spec: it.specification ?? '',
+				remark: it.remark ?? '',
+			})),
+		);
+		setSeeded(true);
+	}, [isEdit, editRes.data, seeded, nav, t, toast]);
+
+	const dirty = isEdit ? touched : lines.length > 0 || !!category || !!remark || !!photo;
 	const { confirming, setConfirming } = useExitGuard(dirty);
 
 	// Smart defaults: today's date, and auto-select the project ONLY when there is
@@ -65,6 +105,7 @@ export function MNewRequest() {
 	);
 
 	function onCategory(v: string) {
+		setTouched(true);
 		setCategory(v);
 		setLines([]);
 	}
@@ -72,6 +113,7 @@ export function MNewRequest() {
 		if (!code || lines.some((l) => l.item_code === code)) return;
 		const o = itemOptions.find((x) => x.value === code);
 		if (!o) return;
+		setTouched(true);
 		setLines((ls) => [
 			...ls,
 			{
@@ -87,14 +129,17 @@ export function MNewRequest() {
 		]);
 	}
 	function setLine(i: number, patch: Partial<Line>) {
+		setTouched(true);
 		setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
 	}
 	function bump(i: number, delta: number) {
+		setTouched(true);
 		setLines((ls) =>
 			ls.map((l, idx) => (idx === i ? { ...l, qty: String(Math.max(0, (Number(l.qty) || 0) + delta)) } : l)),
 		);
 	}
 	function removeLine(i: number) {
+		setTouched(true);
 		setLines((ls) => ls.filter((_, idx) => idx !== i));
 	}
 
@@ -110,7 +155,7 @@ export function MNewRequest() {
 		try {
 			const res = await saveMr({
 				data: {
-					name: null,
+					name: editName ?? null,
 					category,
 					project: project || null,
 					priority,
@@ -153,7 +198,7 @@ export function MNewRequest() {
 
 	return (
 		<>
-			<MHeader title={t('nr.title')} backTo="/m/requests" onBack={dirty ? () => setConfirming(true) : undefined} />
+			<MHeader title={isEdit ? t('nr.editTitle') : t('nr.title')} backTo="/m/requests" onBack={dirty ? () => setConfirming(true) : undefined} />
 			<div className="body task">
 				{err && (
 					<div className="malert">
@@ -181,7 +226,7 @@ export function MNewRequest() {
 					</span>
 					<SearchSelect
 						value={project}
-						onChange={setProject}
+						onChange={(v) => { setTouched(true); setProject(v); }}
 						placeholder={t('nr.projectPlaceholder')}
 						options={(ctx?.projects ?? []).map((p) => ({
 							value: p.name,
@@ -195,14 +240,14 @@ export function MNewRequest() {
 					<span className="mlabel">
 						{t('nr.requiredBy')} <em>*</em>
 					</span>
-					<input className="minp" type="date" value={requiredBy} onChange={(e) => setRequiredBy(e.target.value)} />
+					<input className="minp" type="date" value={requiredBy} onChange={(e) => { setTouched(true); setRequiredBy(e.target.value); }} />
 				</div>
 
 				<div className="mfield">
 					<span className="mlabel">{t('nr.priority')}</span>
 					<div className="seg">
 						{PRIORITIES.map((p) => (
-							<button key={p} className={priority === p ? 'on' : ''} onClick={() => setPriority(p)} type="button">
+							<button key={p} className={priority === p ? 'on' : ''} onClick={() => { setTouched(true); setPriority(p); }} type="button">
 								{t(p === 'Low' ? 'nr.prioLow' : p === 'Medium' ? 'nr.prioMedium' : 'nr.prioHigh')}
 							</button>
 						))}
@@ -283,7 +328,7 @@ export function MNewRequest() {
 						onChange={(e) => {
 							const f = e.target.files?.[0];
 							e.target.value = '';
-							if (f) setPhoto(f);
+							if (f) { setTouched(true); setPhoto(f); }
 						}}
 					/>
 					<button type="button" className={'mphoto' + (photo ? ' has' : '')} onClick={() => photoRef.current?.click()} style={{ minHeight: 76 }}>
@@ -300,7 +345,7 @@ export function MNewRequest() {
 							className="minp"
 							rows={2}
 							value={remark}
-							onChange={(e) => setRemark(e.target.value)}
+							onChange={(e) => { setTouched(true); setRemark(e.target.value); }}
 							placeholder={t('nr.notePlaceholder')}
 						/>
 					</div>

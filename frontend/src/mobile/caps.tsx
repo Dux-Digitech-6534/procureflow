@@ -11,8 +11,11 @@ const DENY: Capabilities = {
 	read_pr: false,
 	read_stock: false,
 	approve: false,
+	create_po: false,
+	pay: false,
 	reports: false,
 	manage_users: false,
+	settings: false,
 	email_configured: false,
 };
 

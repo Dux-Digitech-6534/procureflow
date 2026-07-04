@@ -193,7 +193,7 @@ export function MRequests() {
 				<Icon name="plus" size={20} /> {t('home.new')}
 			</button>
 
-			{open && <MrDetailSheet name={open} onClose={() => setOpen(null)} />}
+			{open && <MrDetailSheet name={open} onClose={() => setOpen(null)} onActed={() => void mutate()} />}
 		</>
 	);
 }

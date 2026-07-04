@@ -41,6 +41,15 @@ doctype_list_js = {
 }
 
 
+# Site supervisors only ever see the POs assigned to them as receiver — enforced
+# at the permission layer (lists + single-doc) so it also covers desk/REST.
+permission_query_conditions = {
+    "Purchase Order": "procureflow.api.purchase_order_query_conditions",
+}
+has_permission = {
+    "Purchase Order": "procureflow.api.purchase_order_has_permission",
+}
+
 doc_events = {
     'Purchase Order': {
         'validate': 'procureflow.purchase_tax.purchase_order_validate',
@@ -50,8 +59,26 @@ doc_events = {
         'before_submit': 'procureflow.signature_api.set_purchase_order_company_signature',
     },
     'Purchase Receipt': {
-        'before_save': 'procureflow.api.populate_purchase_receipt_project_company_from_purchase_order'
-    }
+        'before_save': [
+            'procureflow.api.populate_purchase_receipt_project_company_from_purchase_order',
+            'procureflow.api.stamp_purchase_receipt_attachment_datetimes',
+        ],
+        # Attaching an image to an ALREADY-SUBMITTED receipt goes through
+        # update-after-submit, not before_save — stamp the datetime there too.
+        'before_update_after_submit': [
+            'procureflow.api.stamp_purchase_receipt_attachment_datetimes',
+        ],
+        # Adopt files the user attached BEFORE the first save (they stay pointed
+        # at the temp 'new-purchase-receipt-…' name and would otherwise vanish).
+        'after_insert': [
+            'procureflow.api.adopt_orphan_purchase_receipt_files',
+        ],
+    },
+    # Sidebar attachments only insert a File (no receipt save at all) — the only
+    # attach path left on a submitted receipt. Stamp the hidden datetime from here.
+    'File': {
+        'after_insert': 'procureflow.api.stamp_pr_datetime_from_file',
+    },
 }
 
 

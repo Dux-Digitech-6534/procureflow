@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useFrappeGetCall, useFrappePostCall } from 'frappe-react-sdk';
 import { API, mrDisplayStatus, actionTone, type MrDetail } from '../lib/api';
 import { Icon } from '../components/Icon';
@@ -28,10 +29,42 @@ export function MrDetailSheet({
 	const d = detailRes.data?.message;
 	const { call: applyAction, loading } = useFrappePostCall(API.applyAction);
 	const { t } = useLang();
+	const nav = useNavigate();
 	const toast = useToast();
 	const [rejecting, setRejecting] = useState(false);
 	const [reason, setReason] = useState('');
 	const [err, setErr] = useState('');
+	const { call: deleteDoc, loading: deleting } = useFrappePostCall(API.deleteDoc);
+	const [confirmDel, setConfirmDel] = useState(false);
+	const { call: cancelDoc, loading: cancelling } = useFrappePostCall(API.cancelDoc);
+	const [confirmCancel, setConfirmCancel] = useState(false);
+
+	async function doDelete() {
+		setErr('');
+		try {
+			await deleteDoc({ doctype: 'Material Request', name });
+			toast.success(t('d.deleted'));
+			onActed?.();
+			onClose();
+		} catch (e) {
+			setErr(parseServerError(e));
+			setConfirmDel(false);
+		}
+	}
+
+	async function doCancel() {
+		setErr('');
+		try {
+			await cancelDoc({ doctype: 'Material Request', name });
+			toast.success(t('d.cancelled'));
+			onActed?.();
+			void detailRes.mutate(); // stay open — Delete appears for the now-cancelled doc
+			setConfirmCancel(false);
+		} catch (e) {
+			setErr(parseServerError(e));
+			setConfirmCancel(false);
+		}
+	}
 
 	async function act(action: string, remark = '') {
 		setErr('');
@@ -48,6 +81,14 @@ export function MrDetailSheet({
 	}
 
 	const st = d ? mrDisplayStatus(d) : null;
+
+	// Approve/Reject should show whenever the current user can act on this request —
+	// whether it was opened from the Approvals queue (actions passed in) OR from the
+	// requests list / home / a link (fall back to the permission-checked transitions
+	// that mr_detail returns). Filtered to approval actions so drafts still show Edit.
+	const workflowActions = ((actions && actions.length ? actions : d?.transitions) ?? []).filter(
+		(a) => a === 'Approve' || a === 'Reject',
+	);
 
 	return (
 		<div className="mscope-sheet-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -75,6 +116,14 @@ export function MrDetailSheet({
 								{st && <span className={'chip ' + st.tone}>{tStatus(t, st.label)}</span>}
 								{d.priority && <span className={'prio ' + d.priority}>{tPrio(t, d.priority)}</span>}
 							</div>
+							{d.workflow_state === 'Rejected' && d.rejection_remark && (
+								<div className="malert" style={{ marginBottom: 12 }}>
+									<Icon name="warning" size={16} />
+									<span>
+										<b>{t('d.rejected')}.</b> {d.rejection_remark}
+									</span>
+								</div>
+							)}
 							<div className="fct">
 								<span className="k">{t('d.project')}</span>
 								<span className="v">{d.project ?? '—'}</span>
@@ -121,11 +170,49 @@ export function MrDetailSheet({
 							)}
 
 							<RelatedDocs doctype="Material Request" name={name} />
+
+							{/* A saved draft can be re-opened and edited in place. */}
+							{d.docstatus === 0 && d.workflow_state === 'Draft' && (
+								<button
+									className="mbtn grow"
+									style={{ marginTop: 16 }}
+									onClick={() => {
+										onClose();
+										nav('/m/requests/' + name + '/edit');
+									}}
+								>
+									<Icon name="pencil" size={17} /> {t('d.edit')}
+								</button>
+							)}
+
+							{/* A SUBMITTED request can be cancelled (permission-checked). */}
+							{d.can_cancel && (
+								<button
+									className="mbtn danger grow"
+									style={{ marginTop: 12 }}
+									disabled={cancelling}
+									onClick={() => (confirmCancel ? void doCancel() : setConfirmCancel(true))}
+								>
+									<Icon name="close" size={16} /> {cancelling ? t('d.cancelling') : confirmCancel ? t('d.cancelConfirm') : t('d.cancelDoc')}
+								</button>
+							)}
+
+							{/* A CANCELLED request can be permanently deleted (permission-checked). */}
+							{d.can_delete && (
+								<button
+									className="mbtn danger grow"
+									style={{ marginTop: 12 }}
+									disabled={deleting}
+									onClick={() => (confirmDel ? void doDelete() : setConfirmDel(true))}
+								>
+									<Icon name="trash" size={16} /> {deleting ? t('d.deleting') : confirmDel ? t('d.deleteConfirm') : t('d.delete')}
+								</button>
+							)}
 						</>
 					)}
 				</div>
 
-				{d && actions && actions.length > 0 && (
+				{d && workflowActions.length > 0 && (
 					<div className="sfoot">
 						{rejecting ? (
 							<div style={{ flex: 1 }}>
@@ -147,7 +234,7 @@ export function MrDetailSheet({
 								</div>
 							</div>
 						) : (
-							actions.map((a) =>
+							workflowActions.map((a) =>
 								actionTone(a) === 'danger' ? (
 									<button key={a} className="mbtn danger grow" onClick={() => setRejecting(true)} disabled={loading}>
 										<Icon name="close" size={17} /> {a}

@@ -24,6 +24,10 @@ export function MHome() {
 	const mrRes = useFrappeGetCall<{ message: MrListRow[] }>(API.mrList, {});
 	const poRes = useFrappeGetCall<{ message: ReceivablePo[] }>(API.receivablePos, {});
 	const notifRes = useFrappeGetCall<{ message: NotificationsResult }>(API.notifications, {});
+	// Greet by the user's actual NAME (User.full_name), not the email local-part.
+	const userRes = useFrappeGetCall<{ message: { full_name?: string } }>(API.userInfo, {});
+	const fullName = (userRes.data?.message?.full_name ?? '').trim();
+	const greetName = fullName && !fullName.includes('@') ? fullName.split(/\s+/)[0] : firstName(currentUser);
 
 	const awaitingMe = apprRes.data?.message.material_requests.length ?? 0;
 	const myOpen =
@@ -56,7 +60,7 @@ export function MHome() {
 			<div className="body">
 				<div style={{ margin: '4px 2px 18px' }}>
 					<div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--fg-1)' }}>
-						{t('home.hi', { name: firstName(currentUser) })}
+						{t('home.hi', { name: greetName })}
 					</div>
 					<div style={{ fontSize: 13.5, color: 'var(--fg-3)', marginTop: 2 }}>{t('home.subtitle')}</div>
 				</div>
@@ -87,17 +91,9 @@ export function MHome() {
 							</span>
 							<span className="kv">{toReceive}</span>
 							<span className="kl">{t('home.deliveriesToReceive')}</span>
-						</button>
-					)}
-					{caps.create_mr && (
-						<button className="kpi" onClick={() => nav('/m/requests/new')}>
-							<span className="kic">
-								<Icon name="plus" size={19} />
+							<span className="kl" style={{ fontSize: 10.5, color: 'var(--fg-4)', marginTop: 2 }}>
+								{t('home.receiveHint')}
 							</span>
-							<span className="kv" style={{ fontSize: 17, fontWeight: 650, fontFamily: 'var(--font-ui)' }}>
-								{t('home.new')}
-							</span>
-							<span className="kl">{t('home.raiseMr')}</span>
 						</button>
 					)}
 				</div>

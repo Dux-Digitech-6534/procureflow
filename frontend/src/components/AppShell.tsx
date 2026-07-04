@@ -5,23 +5,25 @@ import { Icon, type IconName } from './Icon';
 import { useTheme } from '../lib/theme';
 import { API, type Capabilities } from '../lib/api';
 
-const NAV: { to: string; label: string; icon: IconName }[] = [
-	{ to: '/dashboard', label: 'Dashboard', icon: 'layers' },
-	{ to: '/material-requests', label: 'Material requests', icon: 'file-text' },
-	{ to: '/purchase-orders', label: 'Purchase orders', icon: 'cube' },
-	{ to: '/receipts', label: 'Receipts', icon: 'package' },
-	{ to: '/approvals', label: 'Approvals', icon: 'shield-check' },
-	{ to: '/payments', label: 'Payments', icon: 'banknote' },
-	{ to: '/reports', label: 'Reports', icon: 'file-text-alt' },
+// `cap` gates the nav entry to a capability flag (from capabilities()); items
+// without a cap show for everyone. Admin roles unlock every capability server-side.
+const NAV: { to: string; label: string; icon: IconName; cap?: keyof Capabilities }[] = [
+	{ to: '/dashboard', label: 'Dashboard', icon: 'layers', cap: 'reports' },
+	{ to: '/material-requests', label: 'Material requests', icon: 'file-text', cap: 'create_mr' },
+	{ to: '/purchase-orders', label: 'Purchase orders', icon: 'cube', cap: 'read_po' },
+	{ to: '/receipts', label: 'Receipts', icon: 'package', cap: 'receive' },
+	{ to: '/approvals', label: 'Approvals', icon: 'shield-check', cap: 'approve' },
+	{ to: '/payments', label: 'Payments', icon: 'banknote', cap: 'pay' },
+	{ to: '/reports', label: 'Reports', icon: 'file-text-alt', cap: 'reports' },
 ];
 
 // Phone bottom-tab bar: the four core documents get a thumb-reachable tab; the
 // rest (Dashboard, Payments, Reports, Settings, theme) live behind "More".
-const MOBILE_PRIMARY: { to: string; short: string; icon: IconName }[] = [
-	{ to: '/material-requests', short: 'Requests', icon: 'file-text' },
-	{ to: '/purchase-orders', short: 'Orders', icon: 'cube' },
-	{ to: '/receipts', short: 'Receipts', icon: 'package' },
-	{ to: '/approvals', short: 'Approvals', icon: 'shield-check' },
+const MOBILE_PRIMARY: { to: string; short: string; icon: IconName; cap?: keyof Capabilities }[] = [
+	{ to: '/material-requests', short: 'Requests', icon: 'file-text', cap: 'create_mr' },
+	{ to: '/purchase-orders', short: 'Orders', icon: 'cube', cap: 'read_po' },
+	{ to: '/receipts', short: 'Receipts', icon: 'package', cap: 'receive' },
+	{ to: '/approvals', short: 'Approvals', icon: 'shield-check', cap: 'approve' },
 ];
 const PRIMARY_SET = new Set(MOBILE_PRIMARY.map((i) => i.to));
 const MOBILE_MORE = NAV.filter((i) => !PRIMARY_SET.has(i.to));
@@ -79,18 +81,25 @@ export function AppShell() {
 	const isPhone = usePhoneWidth();
 	const location = useLocation();
 
-	// Reports is gated to admins / Report Viewer; hide its nav entry otherwise.
+	// Every nav entry is gated to its capability flag — a user only sees the
+	// sections they're authorised for (Payments→Accounts, Reports→Report Viewer,
+	// etc.). Admin roles unlock everything server-side. Until caps load we hide
+	// gated items (fail-closed) so nothing unauthorised ever flashes.
 	const capsRes = useFrappeGetCall<{ message: Capabilities }>(API.capabilities, undefined, 'pf:caps');
 	const caps = capsRes.data?.message;
-	const canReports = !!caps?.reports;
-	const navItems = NAV.filter((i) => i.to !== '/reports' || canReports);
-	const mobileMore = MOBILE_MORE.filter((i) => i.to !== '/reports' || canReports);
+	const allow = (i: { cap?: keyof Capabilities }) => !i.cap || !!caps?.[i.cap];
+	const navItems = NAV.filter(allow);
+	const mobilePrimary = MOBILE_PRIMARY.filter(allow);
+	const mobileMore = MOBILE_MORE.filter(allow);
+	const showSettings = !!caps?.settings;
 
 	async function doLogout() {
 		try {
 			await logout();
 		} finally {
-			window.location.href = '/login';
+			// Carry redirect-to so the NEXT login comes straight back to ProcureFlow —
+			// without it Frappe's login sends desk users to /app and web users to /me.
+			window.location.href = '/login?redirect-to=' + encodeURIComponent('/procureflow');
 		}
 	}
 
@@ -127,10 +136,12 @@ export function AppShell() {
 						</NavLink>
 					))}
 					<div className="push" />
-					<NavLink to="/settings" className={linkClass} title={collapsed ? 'Settings' : undefined}>
-						<Icon name="sliders" size={16} />
-						<span className="lbl">Settings</span>
-					</NavLink>
+					{showSettings && (
+						<NavLink to="/settings" className={linkClass} title={collapsed ? 'Settings' : undefined}>
+							<Icon name="sliders" size={16} />
+							<span className="lbl">Settings</span>
+						</NavLink>
+					)}
 				</nav>
 
 				<a className="duxcredit" href="https://duxdigitech.com" target="_blank" rel="noreferrer" title="Built by DUX Digitech">
@@ -180,7 +191,7 @@ export function AppShell() {
 
 				{/* Phone-only bottom tab bar (hidden ≥700px via CSS) */}
 				<nav className="mbottomnav">
-					{MOBILE_PRIMARY.map((item) => (
+					{mobilePrimary.map((item) => (
 						<NavLink key={item.to} to={item.to} className={tabClass}>
 							<Icon name={item.icon} size={19} />
 							<span className="mtl">{item.short}</span>
@@ -214,10 +225,12 @@ export function AppShell() {
 										<span>{item.label}</span>
 									</NavLink>
 								))}
-								<NavLink to="/settings" className={linkClass} onClick={() => setMoreOpen(false)}>
-									<Icon name="sliders" size={17} />
-									<span>Settings</span>
-								</NavLink>
+								{showSettings && (
+									<NavLink to="/settings" className={linkClass} onClick={() => setMoreOpen(false)}>
+										<Icon name="sliders" size={17} />
+										<span>Settings</span>
+									</NavLink>
+								)}
 							</div>
 							<div className="msheet-foot">
 								<button className="msheet-logout" onClick={() => void doLogout()}>

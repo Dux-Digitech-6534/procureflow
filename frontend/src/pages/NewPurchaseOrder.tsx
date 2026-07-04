@@ -5,6 +5,7 @@ import {
 	API,
 	poDisplayStatus,
 	type ApprovedMr,
+	type Capabilities,
 	type ItemOption,
 	type PoContext,
 	type PoDetail,
@@ -16,6 +17,7 @@ import { Icon } from '../components/Icon';
 import { DocLifecycleActions } from '../components/DocLifecycleActions';
 import { LinkedDocs } from '../components/LinkedDocs';
 import { DocActivity } from '../components/DocActivity';
+import { Attachment } from '../components/Attachment';
 import { CreateSupplierModal } from '../components/CreateSupplierModal';
 import { CreateItemModal } from '../components/CreateItemModal';
 import { useToast } from '../components/Toast';
@@ -85,6 +87,11 @@ export function NewPurchaseOrder() {
 	// the approver's workflow actions instead. Submitted/cancelled are read-only.
 	const editable = isEdit ? !!detail && detail.docstatus === 0 && detail.workflow_state === 'Draft' : true;
 	const readOnly = !editable;
+
+	// WhatsApp send is a Purchase-Officer action (create_po capability) — viewers
+	// like the assigned receiver shouldn't be messaging suppliers.
+	const capsRes = useFrappeGetCall<{ message: Capabilities }>(API.capabilities, undefined, 'pf:caps');
+	const canSendWhatsApp = !!capsRes.data?.message?.create_po;
 
 	const { call: savePo, loading: saving } = useFrappePostCall<{ message: SavePoResult }>(API.savePo);
 	const { call: fetchMrItems } = useFrappePostCall<{ message: { category: string; project: string; requester?: string; items: PoSourceLine[] } }>(API.mrItemsForPo);
@@ -541,7 +548,7 @@ export function NewPurchaseOrder() {
 						<Icon name="file-text" size={15} /> Print
 					</button>
 				)}
-				{isEdit && detail && detail.docstatus === 1 && (
+				{isEdit && detail && detail.docstatus === 1 && canSendWhatsApp && (
 					<button
 						className="btn"
 						onClick={() => window.open(whatsAppPoUrl(detail), '_blank', 'noopener')}
@@ -592,6 +599,7 @@ export function NewPurchaseOrder() {
 						transitions={detail.transitions}
 						canCancel={detail.can_cancel}
 						canAmend={detail.can_amend}
+						canDelete={detail.can_delete}
 						onChanged={() => void detailRes.mutate()}
 						basePath="/purchase-orders"
 					/>
@@ -747,11 +755,18 @@ export function NewPurchaseOrder() {
 								/>
 								<div className={'upload' + (readOnly ? ' disabled' : '')} onClick={() => !readOnly && fileRef.current?.click()}>
 									<Icon name="download" size={20} style={{ transform: 'rotate(180deg)' }} />
-									<div>
+									<div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
 										{attachment ? (
-											<a href={attachment} target="_blank" rel="noreferrer" style={{ color: 'var(--iris)' }}>View attached file</a>
+											<span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-block', maxWidth: '100%' }}>
+												<Attachment url={attachment} label="Attachment" />
+											</span>
 										) : pendingFile ? (
-											<span><b>{pendingFile.name}</b> <span className="dim">— attaches on save</span></span>
+											<span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex', flexDirection: 'column', gap: 6, maxWidth: '100%' }}>
+												{pendingFile.type.startsWith('image/') && (
+													<img src={URL.createObjectURL(pendingFile)} alt={pendingFile.name} style={{ height: 88, width: 'auto', maxWidth: 160, borderRadius: 9, objectFit: 'cover' }} onLoad={(e) => URL.revokeObjectURL((e.target as HTMLImageElement).src)} />
+												)}
+												<span><b>{pendingFile.name}</b> <span className="dim">— attaches on save</span></span>
+											</span>
 										) : uploading ? (
 											'Uploading…'
 										) : readOnly ? (

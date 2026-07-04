@@ -27,6 +27,7 @@ export function DocLifecycleActions({
 	transitions,
 	canCancel,
 	canAmend,
+	canDelete,
 	onChanged,
 	basePath,
 }: {
@@ -36,14 +37,17 @@ export function DocLifecycleActions({
 	transitions: string[];
 	canCancel: boolean;
 	canAmend: boolean;
+	canDelete: boolean;
 	onChanged: () => void;
 	basePath: string;
 }) {
 	const navigate = useNavigate();
 	const { call: cancelDoc, loading: cancelling } = useFrappePostCall<{ message: { name: string } }>(API.cancelDoc);
 	const { call: amendDoc, loading: amending } = useFrappePostCall<{ message: { name: string } }>(API.amendDoc);
+	const { call: deleteDoc, loading: deleting } = useFrappePostCall<{ message: { name: string } }>(API.deleteDoc);
 	const toast = useToast();
 	const [confirmCancel, setConfirmCancel] = useState(false);
+	const [confirmDelete, setConfirmDelete] = useState(false);
 	const [err, setErr] = useState('');
 
 	async function doCancel() {
@@ -69,7 +73,19 @@ export function DocLifecycleActions({
 		}
 	}
 
-	const hasAny = (transitions?.length ?? 0) > 0 || canCancel || canAmend;
+	async function doDelete() {
+		setErr('');
+		try {
+			await deleteDoc({ doctype, name });
+			toast.success(`${noun.charAt(0).toUpperCase() + noun.slice(1)} deleted`);
+			setConfirmDelete(false);
+			navigate(basePath);
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
+	const hasAny = (transitions?.length ?? 0) > 0 || canCancel || canAmend || canDelete;
 	if (!hasAny) return null;
 
 	return (
@@ -86,6 +102,29 @@ export function DocLifecycleActions({
 				<button className="btn" disabled={amending} onClick={() => void doAmend()}>
 					<Icon name="copy" size={14} /> {amending ? 'Amending…' : 'Amend'}
 				</button>
+			)}
+			{canDelete && (
+				<button className="btn danger" onClick={() => setConfirmDelete(true)}>
+					<Icon name="trash" size={14} /> Delete {noun}
+				</button>
+			)}
+
+			{confirmDelete && (
+				<Modal title={`Delete ${noun} — ${name}`} icon="warning" onClose={() => setConfirmDelete(false)}>
+					<div style={{ padding: '14px 18px', fontSize: 13.5, color: 'var(--fg-2)', lineHeight: 1.55 }}>
+						This permanently deletes the cancelled {noun} <b>{name}</b>. This cannot be undone.
+					</div>
+					<div className="formfoot">
+						{err && <span className="ferr">{err}</span>}
+						<span className="spacer" />
+						<button className="btn" onClick={() => setConfirmDelete(false)}>
+							Keep it
+						</button>
+						<button className="btn danger" disabled={deleting} onClick={() => void doDelete()}>
+							{deleting ? 'Deleting…' : `Delete ${noun}`}
+						</button>
+					</div>
+				</Modal>
 			)}
 
 			{confirmCancel && (

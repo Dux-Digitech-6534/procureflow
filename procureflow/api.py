@@ -1,7 +1,7 @@
 import frappe
 from frappe.model.mapper import get_mapped_doc
 from frappe.model.workflow import apply_workflow, get_workflow
-from frappe.utils import flt, nowdate
+from frappe.utils import flt, now_datetime, nowdate
 
 @frappe.whitelist()
 def make_supplier_quotation(source_name, target_doc=None):
@@ -261,6 +261,116 @@ def populate_purchase_receipt_project_company_from_purchase_order(doc, method=No
 
     if update_db and changed_values:
         frappe.db.set_value("Purchase Receipt", doc.name, changed_values, update_modified=False)
+
+
+def stamp_purchase_receipt_attachment_datetimes(doc, method=None):
+    """Record WHEN a receipt attachment was added in the (hidden) datetime fields —
+    server-side so it is captured for both the SPA and the desk, not just when the
+    desk client script's change-event happens to fire. On a SUBMITTED receipt
+    (attach during update-after-submit) the datetime fields aren't allow_on_submit,
+    so write them straight to the DB instead of only on the doc."""
+    submitted = doc.docstatus == 1
+    for attach_field, dt_field in (
+        ("custom_add_material", "custom_material_receipt_datetime"),
+        ("custom_add_invoice", "custom_material_invoice_datetime"),
+    ):
+        if not (doc.get(attach_field) and not doc.get(dt_field)):
+            continue
+        stamp = now_datetime()
+        if submitted and doc.name:
+            frappe.db.set_value("Purchase Receipt", doc.name, dt_field, stamp, update_modified=False)
+        doc.set(dt_field, stamp)
+
+
+def stamp_pr_datetime_from_file(doc, method=None):
+    """File→Purchase Receipt attach hook. The desk's SIDEBAR attach (the only way
+    to attach on a submitted receipt, since the Attach fields aren't
+    allow_on_submit) just inserts a File — no receipt save, so the before_save
+    stamp never fires. Stamp the hidden datetime here instead."""
+    if doc.get("attached_to_doctype") != "Purchase Receipt":
+        return
+    name = doc.get("attached_to_name")
+    if not name or str(name).startswith("new-") or not frappe.db.exists("Purchase Receipt", name):
+        return
+    # Attached straight to a photo field? stamp that field's datetime; a plain
+    # sidebar attachment counts as the material-receipt photo by default.
+    field = doc.get("attached_to_field")
+    dt_field = (
+        "custom_material_invoice_datetime"
+        if field == "custom_add_invoice"
+        else "custom_material_receipt_datetime"
+    )
+    if not frappe.db.get_value("Purchase Receipt", name, dt_field):
+        frappe.db.set_value("Purchase Receipt", name, dt_field, now_datetime(), update_modified=False)
+
+
+# ---------------------------------------------------------------------------
+# Purchase Order visibility: a site supervisor sees ONLY the POs they are the
+# assigned receiver of (custom_receiver). Enforced at the PERMISSION layer so it
+# holds everywhere — ProcureFlow lists, desk, standard REST — not just the UI.
+# Purchasing/admin roles keep full visibility.
+# ---------------------------------------------------------------------------
+PO_FULL_VISIBILITY_ROLES = {
+    "Administrator", "System Manager", "Purchase Manager", "Purchase Officer",
+    "PO Approver", "Purchase User", "Accounts User", "Settings Manager",
+}
+
+
+def _po_restricted_user(user):
+    """True for users whose PO visibility is limited to their assigned POs:
+    they hold Supervisor and NONE of the purchasing/admin roles."""
+    if not user or user == "Administrator":
+        return False
+    roles = set(frappe.get_roles(user))
+    if roles & PO_FULL_VISIBILITY_ROLES:
+        return False
+    return "Supervisor" in roles
+
+
+def purchase_order_query_conditions(user=None, doctype=None):
+    """List views / get_list: restricted users only match POs assigned to them."""
+    user = user or frappe.session.user
+    if not _po_restricted_user(user):
+        return ""
+    return "`tabPurchase Order`.`custom_receiver` = {}".format(frappe.db.escape(user))
+
+
+def purchase_order_has_permission(doc, ptype=None, user=None, debug=False):
+    """Single-doc access: a restricted user may only touch a PO they receive.
+    NOTE: in this Frappe version a has_permission hook can only DENY — any falsy
+    return (including None) blocks the doc, so 'defer' must be returned as True
+    (True does not grant anything beyond what role permissions already allow)."""
+    user = user or frappe.session.user
+    if not _po_restricted_user(user):
+        return True  # defer to normal role permissions
+    if doc.get("custom_receiver") == user:
+        return True
+    return False
+
+
+def adopt_orphan_purchase_receipt_files(doc, method=None):
+    """Desk users attach photos BEFORE the receipt's first save; those Files stay
+    pointed at the temp 'new-purchase-receipt-…' name, so they vanish from the
+    saved receipt (and never get a datetime). On first save, adopt the user's
+    recent orphaned uploads onto the just-saved receipt and stamp the datetime."""
+    from frappe.utils import add_to_date
+
+    orphans = frappe.get_all(
+        "File",
+        filters={
+            "attached_to_doctype": "Purchase Receipt",
+            "attached_to_name": ["like", "new-%"],
+            "owner": frappe.session.user,
+            "creation": [">", add_to_date(now_datetime(), hours=-2)],
+        },
+        pluck="name",
+    )
+    for fn in orphans:
+        frappe.db.set_value("File", fn, "attached_to_name", doc.name, update_modified=False)
+    if orphans and not frappe.db.get_value("Purchase Receipt", doc.name, "custom_material_receipt_datetime"):
+        frappe.db.set_value(
+            "Purchase Receipt", doc.name, "custom_material_receipt_datetime", now_datetime(), update_modified=False
+        )
 
 
 def get_purchase_receipt_purchase_order(doc):

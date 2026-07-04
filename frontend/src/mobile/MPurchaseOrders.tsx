@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useFrappeGetCall } from 'frappe-react-sdk';
 import { API, poDisplayStatus, type PoListRow } from '../lib/api';
 import { Icon } from '../components/Icon';
 import { fmtDate, fmtMoney } from '../lib/format';
 import { MHeader, MLoad, MEmpty, MSearch, MChips, PullToRefresh } from './MobileShell';
 import { PoDetailSheet } from './PoDetailSheet';
+import { useCaps } from './caps';
 import { useLang, tStatus } from './i18n';
 
 function poGroup(r: PoListRow): string {
@@ -15,8 +17,9 @@ function poGroup(r: PoListRow): string {
 			return 'pending';
 		case 'Ordered':
 			return 'ordered';
-		case 'Received':
 		case 'Partially received':
+			return 'partial';
+		case 'Received':
 			return 'received';
 		case 'Closed':
 			return 'closed';
@@ -32,6 +35,7 @@ const STATUS_FILTERS: { key: string; labelKey: string }[] = [
 	{ key: 'draft', labelKey: 'status.draft' },
 	{ key: 'pending', labelKey: 'status.pending' },
 	{ key: 'ordered', labelKey: 'status.ordered' },
+	{ key: 'partial', labelKey: 'status.partiallyReceived' },
 	{ key: 'received', labelKey: 'status.received' },
 	{ key: 'closed', labelKey: 'status.closed' },
 	{ key: 'rejected', labelKey: 'status.rejected' },
@@ -39,6 +43,8 @@ const STATUS_FILTERS: { key: string; labelKey: string }[] = [
 
 export function MPurchaseOrders() {
 	const { t } = useLang();
+	const nav = useNavigate();
+	const caps = useCaps();
 	const { data, isLoading, error, mutate } = useFrappeGetCall<{ message: PoListRow[] }>(API.poList, {});
 	const [open, setOpen] = useState<string | null>(null);
 	const [q, setQ] = useState('');
@@ -131,7 +137,13 @@ export function MPurchaseOrders() {
 				)}
 			</div>
 
-			{open && <PoDetailSheet name={open} onClose={() => setOpen(null)} />}
+			{caps.create_po && (
+				<button className="fab" onClick={() => nav('/m/orders/new')}>
+					<Icon name="plus" size={20} /> {t('npo.new')}
+				</button>
+			)}
+
+			{open && <PoDetailSheet name={open} onClose={() => setOpen(null)} onActed={() => void mutate()} />}
 		</>
 	);
 }

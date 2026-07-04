@@ -14,9 +14,37 @@
 
 /* Per-field labels for stacked item lines. On desktop the .lf wrapper
    collapses with display:contents so the original grid is unchanged and
-   the label is hidden; on phones (below) it becomes a label-over-field. */
+   the label is hidden; below 1024px it becomes a label-over-field. */
 .lf { display: contents; }
 .lfl { display: none; }
+
+/* ---- Item-line grids -> labelled vertical cards (tablet + small laptop) ----
+   The MR/PO/Receipt item rows use fixed-px grid tracks (e.g. .mrtop:
+   24px ... 152px 84px 108px 140px 28px) whose sum (~600px of non-flexible
+   width) cannot shrink. Below ~1024px of available content width the inputs
+   in those tracks collide with the item name/category. Stacking the rows
+   into labelled cards (reusing the .lf/.lfl pattern wired in the JSX) at the
+   1024px breakpoint covers the whole tablet/small-laptop band — the rest of
+   the phone chrome stays at 700px below. !important beats the inline
+   gridTemplateColumns NewReceipt.tsx sets on its reused .mrtop/.mrhead. */
+@media (max-width: 1024px) {
+	.mrhead, .pohead, .reqhead { display: none; }
+	.mrtop, .potop, .reqrow { grid-template-columns: 1fr !important; gap: 12px; }
+	.mrtop .ix, .potop .ix { display: none; }
+	.mrbot, .pobot { grid-template-columns: 1fr; padding-left: 0; gap: 12px; margin-top: 12px; }
+	.mrline, .poline {
+		border: 1px solid var(--hairline); border-radius: 13px;
+		margin: 0 0 11px; padding: 14px; background: var(--surface-1);
+	}
+	.mrline:hover, .poline:hover { background: var(--surface-1); }
+	.lf { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+	.lfl {
+		display: block; font-size: 10px; font-weight: 600;
+		letter-spacing: .06em; text-transform: uppercase; color: var(--fg-4);
+	}
+	.poline .amt { text-align: left; color: var(--fg-1); }
+	.mrtop .xbtn, .potop .xbtn { justify-self: end; width: 42px; height: 42px; }
+}
 
 @media (max-width: 700px) {
 	/* avoid iOS/Android auto text inflation on rotate */
@@ -113,27 +141,11 @@
 	.icbtn { width: 42px; height: 42px; }
 	.formfoot { flex-wrap: wrap; padding: 14px; }
 
-	/* ---- Item-line grids -> labelled vertical cards ----
-	   Each field is wrapped in .lf, which here becomes a label-over-field.
-	   !important beats the inline gridTemplateColumns on the Receipt's
-	   reused .mrtop so it stacks too. ---- */
-	.mrhead, .pohead, .reqhead { display: none; }
-	.mrtop, .potop, .reqrow { grid-template-columns: 1fr !important; gap: 12px; }
-	.mrtop .ix, .potop .ix { display: none; }
-	.mrbot, .pobot { grid-template-columns: 1fr; padding-left: 0; gap: 12px; margin-top: 12px; }
-	.mrline, .poline {
-		border: 1px solid var(--hairline); border-radius: 13px;
-		margin: 0 0 11px; padding: 14px; background: var(--surface-1);
-	}
-	.mrline:hover, .poline:hover { background: var(--surface-1); }
-	.lf { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-	.lfl {
-		display: block; font-size: 10px; font-weight: 600;
-		letter-spacing: .06em; text-transform: uppercase; color: var(--fg-4);
-	}
+	/* ---- Item-line cards: bump to phone-sized touch targets ----
+	   The card/stacking itself is handled by the <=1024px block above;
+	   here we only enlarge the inputs for thumbs on phones. ---- */
 	.mrline .inp, .poline .inp { height: 42px; font-size: 14px; }
-	.poline .amt { text-align: left; font-size: 14px; color: var(--fg-1); }
-	.mrtop .xbtn, .potop .xbtn { justify-self: end; width: 42px; height: 42px; }
+	.poline .amt { font-size: 14px; }
 
 	/* ---- List toolbar (DataTable chead): wrap, full-width search ---- */
 	.chead { flex-wrap: wrap; row-gap: 8px; }

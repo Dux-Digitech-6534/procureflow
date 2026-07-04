@@ -6,6 +6,7 @@ import { useToast } from '../components/Toast';
 import { fmtDateLong, fmtMoney, parseServerError } from '../lib/format';
 import { whatsAppPoUrl } from '../lib/whatsapp';
 import { RelatedDocs } from './RelatedDocs';
+import { useCaps } from './caps';
 import { useLang, tStatus } from './i18n';
 
 /**
@@ -29,9 +30,41 @@ export function PoDetailSheet({
 	const { call: applyAction, loading } = useFrappePostCall(API.applyAction);
 	const { t } = useLang();
 	const toast = useToast();
+	const caps = useCaps();
 	const [rejecting, setRejecting] = useState(false);
 	const [reason, setReason] = useState('');
 	const [err, setErr] = useState('');
+	const { call: deleteDoc, loading: deleting } = useFrappePostCall(API.deleteDoc);
+	const [confirmDel, setConfirmDel] = useState(false);
+	const { call: cancelDoc, loading: cancelling } = useFrappePostCall(API.cancelDoc);
+	const [confirmCancel, setConfirmCancel] = useState(false);
+
+	async function doDelete() {
+		setErr('');
+		try {
+			await deleteDoc({ doctype: 'Purchase Order', name });
+			toast.success(t('d.deleted'));
+			onActed?.();
+			onClose();
+		} catch (e) {
+			setErr(parseServerError(e));
+			setConfirmDel(false);
+		}
+	}
+
+	async function doCancel() {
+		setErr('');
+		try {
+			await cancelDoc({ doctype: 'Purchase Order', name });
+			toast.success(t('d.cancelled'));
+			onActed?.();
+			void detailRes.mutate(); // stay open — Delete appears for the now-cancelled doc
+			setConfirmCancel(false);
+		} catch (e) {
+			setErr(parseServerError(e));
+			setConfirmCancel(false);
+		}
+	}
 
 	async function act(action: string, remark = '') {
 		setErr('');
@@ -47,6 +80,13 @@ export function PoDetailSheet({
 
 	const st = d ? poDisplayStatus(d) : null;
 	const total = d?.rounded_total ?? d?.grand_total ?? null;
+
+	// Show Place-order / Reject whenever this user can act on the PO — from the
+	// approvals queue (actions passed) OR when browsing a Pending PO from the list
+	// (fall back to the permission-checked transitions po_detail returns). Excludes
+	// the owner's "Send for Approval" submit step so it never appears on drafts.
+	const derived = d?.workflow_state === 'Pending' ? (d?.transitions ?? []) : [];
+	const workflowActions = (actions && actions.length ? actions : derived).filter((a) => a !== 'Send for Approval');
 
 	return (
 		<div className="mscope-sheet-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -97,17 +137,29 @@ export function PoDetailSheet({
 							)}
 
 							<div className="eyebrow2">{t('common.items')} · {d.items.length}</div>
-							{d.items.map((it) => (
-								<div className="iline" key={it.item_code}>
-									<div className="inm2">
-										<div className="t1">{it.item_name}</div>
-										<div className="t2">
-											{it.qty} {it.uom} · {fmtMoney(it.rate_with_tax ?? it.rate, 'INR')}
+							{d.items.map((it) => {
+								const rec = Number(it.received_qty) || 0;
+								const remaining = Math.round((Number(it.qty) - rec) * 1000) / 1000;
+								return (
+									<div className="iline" key={it.item_code}>
+										<div className="inm2">
+											<div className="t1">{it.item_name}</div>
+											<div className="t2">
+												{it.qty} {it.uom} · {fmtMoney(it.rate_with_tax ?? it.rate, 'INR')}
+											</div>
+											{rec > 0 && remaining > 0 && (
+												<div className="t2" style={{ color: 'var(--amber, #b45309)' }}>
+													{t('d.remaining', { n: remaining, uom: it.uom, r: rec, o: it.qty })}
+												</div>
+											)}
+											{rec > 0 && remaining <= 0 && (
+												<div className="t2" style={{ color: 'var(--ok-fg, #15803d)' }}>{t('d.fullyReceived')}</div>
+											)}
 										</div>
+										<span className="iq">{fmtMoney(it.amount, 'INR')}</span>
 									</div>
-									<span className="iq">{fmtMoney(it.amount, 'INR')}</span>
-								</div>
-							))}
+								);
+							})}
 
 							<div className="eyebrow2">{t('d.totals')}</div>
 							<div className="fct">
@@ -125,7 +177,9 @@ export function PoDetailSheet({
 								<span className="v">{fmtMoney(total, 'INR')}</span>
 							</div>
 
-							{d.docstatus === 1 && (
+							{/* Sending the PO to the supplier is a Purchase-Officer action —
+							    viewers (e.g. the assigned receiver) don't get the button. */}
+							{d.docstatus === 1 && caps.create_po && (
 								<a
 									className="mbtn sec"
 									href={whatsAppPoUrl(d)}
@@ -138,11 +192,35 @@ export function PoDetailSheet({
 							)}
 
 							<RelatedDocs doctype="Purchase Order" name={name} />
+
+							{/* A SUBMITTED order can be cancelled (permission-checked). */}
+							{d.can_cancel && (
+								<button
+									className="mbtn danger grow"
+									style={{ marginTop: 12 }}
+									disabled={cancelling}
+									onClick={() => (confirmCancel ? void doCancel() : setConfirmCancel(true))}
+								>
+									<Icon name="close" size={16} /> {cancelling ? t('d.cancelling') : confirmCancel ? t('d.cancelConfirm') : t('d.cancelDoc')}
+								</button>
+							)}
+
+							{/* A CANCELLED order can be permanently deleted (permission-checked). */}
+							{d.can_delete && (
+								<button
+									className="mbtn danger grow"
+									style={{ marginTop: 16 }}
+									disabled={deleting}
+									onClick={() => (confirmDel ? void doDelete() : setConfirmDel(true))}
+								>
+									<Icon name="trash" size={16} /> {deleting ? t('d.deleting') : confirmDel ? t('d.deleteConfirm') : t('d.delete')}
+								</button>
+							)}
 						</>
 					)}
 				</div>
 
-				{d && actions && actions.length > 0 && (
+				{d && workflowActions.length > 0 && (
 					<div className="sfoot">
 						{rejecting ? (
 							<div style={{ flex: 1 }}>
@@ -164,7 +242,7 @@ export function PoDetailSheet({
 								</div>
 							</div>
 						) : (
-							actions.map((a) =>
+							workflowActions.map((a) =>
 								actionTone(a) === 'danger' ? (
 									<button key={a} className="mbtn danger grow" onClick={() => setRejecting(true)} disabled={loading}>
 										<Icon name="close" size={17} /> {a}

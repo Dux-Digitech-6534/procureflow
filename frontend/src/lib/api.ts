@@ -18,6 +18,7 @@ export const API = {
 	applyAction: 'procureflow.react_api.apply_action',
 	cancelDoc: 'procureflow.react_api.cancel_doc',
 	amendDoc: 'procureflow.react_api.amend_doc',
+	deleteDoc: 'procureflow.react_api.delete_doc',
 	setPoStatus: 'procureflow.react_api.set_po_status',
 	pendingApprovals: 'procureflow.react_api.pending_approvals',
 	receivablePos: 'procureflow.react_api.receivable_pos',
@@ -31,6 +32,8 @@ export const API = {
 	docLinks: 'procureflow.react_api.doc_links',
 	settingsCanCreate: 'procureflow.react_api.settings_can_create',
 	renameMaster: 'procureflow.react_api.rename_master',
+	deleteMaster: 'procureflow.react_api.delete_master',
+	deleteMasters: 'procureflow.react_api.delete_masters',
 	updateMaster: 'procureflow.react_api.update_master',
 	createMaster: 'procureflow.react_api.create_master',
 	saveItem: 'procureflow.react_api.save_item',
@@ -41,6 +44,12 @@ export const API = {
 	resetUserPassword: 'procureflow.react_api.reset_user_password',
 	getTolerance: 'procureflow.react_api.get_tolerance',
 	saveTolerance: 'procureflow.react_api.save_tolerance',
+	approvalRoutingContext: 'procureflow.react_api.approval_routing_context',
+	approvalMappings: 'procureflow.react_api.approval_mappings',
+	approvalMappingOptions: 'procureflow.react_api.approval_mapping_options',
+	saveApprovalMapping: 'procureflow.react_api.save_approval_mapping',
+	saveApprovalMappings: 'procureflow.react_api.save_approval_mappings',
+	deleteApprovalMapping: 'procureflow.react_api.delete_approval_mapping',
 	docActivity: 'procureflow.react_api.doc_activity',
 	userInfo: 'procureflow.react_api.user_info',
 	capabilities: 'procureflow.react_api.capabilities',
@@ -216,6 +225,8 @@ export interface MrListRow {
 	per_ordered: number | null;
 	per_received: number | null;
 	had_cancelled_order: boolean;
+	has_active_order: boolean;
+	custom_rejection_remark: string | null;
 	items: number;
 	actions?: string[];
 }
@@ -237,6 +248,7 @@ export interface DocActionState {
 	transitions: string[];
 	can_cancel: boolean;
 	can_amend: boolean;
+	can_delete: boolean;
 }
 
 export interface MrDetail extends DocActionState {
@@ -254,6 +266,8 @@ export interface MrDetail extends DocActionState {
 	per_ordered: number | null;
 	per_received: number | null;
 	had_cancelled_order: boolean;
+	has_active_order: boolean;
+	rejection_remark: string | null;
 	attachment: string | null;
 	items: MrLine[];
 	can_create_po: boolean;
@@ -309,10 +323,16 @@ export function mrDisplayStatus(r: {
 	status?: string | null;
 	docstatus?: number;
 	had_cancelled_order?: boolean;
+	has_active_order?: boolean;
 }): DisplayStatus {
 	if (r.docstatus === 2 || r.status === 'Cancelled') return { label: 'Cancelled', tone: 'err' };
 	if (r.status === 'Stopped') return { label: 'Stopped', tone: 'neutral' };
 	if (r.docstatus === 1) {
+		// A PO was cancelled and NO live PO remains → the order is off, whatever
+		// ERPNext's (possibly stale) status says. Received quantities still win.
+		const orderDead =
+			r.had_cancelled_order && r.has_active_order === false && r.status !== 'Received' && r.status !== 'Partially Received';
+		if (orderDead) return { label: 'Order cancelled', tone: 'err' };
 		switch (r.status) {
 			case 'Received':
 				return { label: 'Received', tone: 'ok' };
@@ -325,7 +345,7 @@ export function mrDisplayStatus(r: {
 			default: // "Pending" = approved, nothing currently ordered
 				// If a PO was placed then cancelled, don't show a fresh green "Approved".
 				return r.had_cancelled_order
-					? { label: 'Order cancelled', tone: 'neutral' }
+					? { label: 'Order cancelled', tone: 'err' }
 					: { label: 'Approved', tone: 'ok' };
 		}
 	}
@@ -372,11 +392,19 @@ export interface PoSourceLine {
 	uom: string;
 	uoms: UomOption[];
 	qty: number;
+	gst_percent: number | null;
 	specification: string | null;
 	remark: string | null;
 	material_request: string | null;
 	material_request_item: string | null;
 	sub_category: string | null;
+}
+
+export interface MrItemsForPo {
+	category: string | null;
+	project: string | null;
+	requester: string | null;
+	items: PoSourceLine[];
 }
 
 export interface PoListRow {
@@ -407,6 +435,7 @@ export interface PoLine {
 	gst_percent: number | null;
 	rate_with_tax: number | null;
 	amount: number;
+	received_qty: number | null;
 	specification: string | null;
 	remark: string | null;
 	schedule_date: string | null;
@@ -537,6 +566,25 @@ export interface Tolerance {
 	can_edit: boolean;
 }
 
+export interface ApprovalRoutingContext {
+	available: boolean;
+	can_manage: boolean;
+}
+
+export interface ApprovalMapping {
+	name: string;
+	project: string;
+	approver_user: string;
+	approver_name: string;
+	enabled: boolean;
+	modified: string;
+}
+
+export interface ApprovalMappingOptions {
+	projects: string[];
+	users: { value: string; label: string }[];
+}
+
 export interface ActivityChange {
 	label: string;
 	from: string | null;
@@ -612,6 +660,8 @@ export interface PrDetail {
 	outstanding: number;
 	material_image: string | null;
 	invoice_image: string | null;
+	attachments: string[];
+	can_delete: boolean;
 	items: PrDetailItem[];
 }
 
@@ -699,8 +749,11 @@ export interface Capabilities {
 	read_pr: boolean;
 	read_stock: boolean;
 	approve: boolean;
+	create_po: boolean;
+	pay: boolean;
 	reports: boolean;
 	manage_users: boolean;
+	settings: boolean;
 	email_configured: boolean;
 }
 

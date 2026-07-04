@@ -33,7 +33,9 @@ export function MProfile() {
 		try {
 			await logout();
 		} finally {
-			window.location.href = '/login';
+			// Carry redirect-to so the NEXT login lands back in the mobile app —
+			// without it Frappe's login sends desk users to /app and web users to /me.
+			window.location.href = '/login?redirect-to=' + encodeURIComponent('/procureflow/m');
 		}
 	}
 

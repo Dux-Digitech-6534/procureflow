@@ -16,7 +16,7 @@ import re
 import frappe
 from frappe import _
 from frappe.model.workflow import apply_workflow, get_transitions
-from frappe.utils import cint, flt, nowdate
+from frappe.utils import cint, flt, now_datetime, nowdate
 
 MR_TYPE = "Purchase"
 MR_PENDING_STATE = "Pending Approval"
@@ -56,12 +56,34 @@ def _filter_owner_only_actions(doc, actions):
     return actions
 
 
+def _filter_project_approval_actions(doc, actions):
+    """Keep the SPA's Approve/Reject buttons in sync with the project_wise_mr_approval
+    app (if installed): only show them to a user actually allowed to approve THIS
+    Material Request's project (its mapped approver, a Purchase Officer, or when the
+    request has no project). Without this the SPA would offer Approve/Reject on every
+    project's request (Frappe's core get_transitions is project-unaware) and the click
+    would then be rejected server-side. No-op if the app isn't installed."""
+    if getattr(doc, "doctype", None) != "Material Request":
+        return actions
+    try:
+        from project_wise_mr_approval.api import can_user_approve_mr_doc
+    except Exception:
+        return actions
+    try:
+        if can_user_approve_mr_doc(doc):
+            return actions
+    except Exception:
+        return actions
+    return [a for a in actions if (a or "").lower() not in ("approve", "reject")]
+
+
 def _doc_actions(doctype, name, state):
     if state not in ACTIONABLE_STATES.get(doctype, set()):
         return []
     try:
         doc = frappe.get_doc(doctype, name)
-        return _filter_owner_only_actions(doc, _uniq(t.action for t in get_transitions(doc)))
+        acts = _filter_owner_only_actions(doc, _uniq(t.action for t in get_transitions(doc)))
+        return _filter_project_approval_actions(doc, acts)
     except Exception:
         return []
 
@@ -90,6 +112,7 @@ def _doc_action_state(doc):
     transitions = []
     try:
         transitions = _filter_owner_only_actions(doc, _uniq(t.action for t in get_transitions(doc)))
+        transitions = _filter_project_approval_actions(doc, transitions)
     except Exception:
         transitions = []
     can_cancel = bool(doc.docstatus == 1 and frappe.has_permission(doc.doctype, "cancel", doc))
@@ -97,7 +120,9 @@ def _doc_action_state(doc):
     can_amend = bool(
         doc.docstatus == 2 and not already_amended and frappe.has_permission(doc.doctype, "amend", doc)
     )
-    return {"transitions": transitions, "can_cancel": can_cancel, "can_amend": can_amend}
+    # A cancelled doc (docstatus 2) can be permanently deleted (with delete perm).
+    can_delete = bool(doc.docstatus == 2 and frappe.has_permission(doc.doctype, "delete", doc))
+    return {"transitions": transitions, "can_cancel": can_cancel, "can_amend": can_amend, "can_delete": can_delete}
 
 
 def _company():
@@ -271,7 +296,10 @@ def save_material_request(data):
                 "uom": uom,
                 "stock_uom": item.stock_uom,
                 "conversion_factor": _conversion_factor(item.name, uom, item.stock_uom),
-                "schedule_date": row.get("schedule_date") or doc.schedule_date,
+                # Inherit the header Required-by so ERPNext's validate_schedule_date
+                # (header = min(item dates)) recomputes to the SAME value — otherwise
+                # a changed header gets reverted to the stale line dates on save.
+                "schedule_date": doc.schedule_date,
                 "warehouse": set_warehouse,
                 "custom_specification": row.get("specification"),
                 "custom_remark": row.get("remark"),
@@ -323,10 +351,12 @@ def mr_list(search="", limit=100):
             "owner",
             "per_ordered",
             "per_received",
+            "custom_rejection_remark",
         ],
         order_by="modified desc",
         limit_page_length=int(limit),
     )
+    rows = _hide_amended_originals("Material Request", rows)
     names = [r.name for r in rows]
     counts = {}
     cancelled_order = set()
@@ -347,6 +377,18 @@ def mr_list(search="", limit=100):
             limit_page_length=0,
         ):
             cancelled_order.add(r.material_request)
+    # MRs that STILL have a live (submitted) PO — so a cancelled order that was
+    # re-ordered/amended shows as Ordered, while one with no live PO left shows
+    # as Order cancelled even if ERPNext's status field is stale.
+    active_order = set()
+    if names:
+        for r in frappe.get_all(
+            "Purchase Order Item",
+            filters={"material_request": ["in", names], "docstatus": 1},
+            fields=["material_request"],
+            limit_page_length=0,
+        ):
+            active_order.add(r.material_request)
     search = (search or "").strip().lower()
     out = []
     for r in rows:
@@ -356,6 +398,7 @@ def mr_list(search="", limit=100):
             continue
         r["items"] = counts.get(r.name, 0)
         r["had_cancelled_order"] = r.name in cancelled_order
+        r["has_active_order"] = r.name in active_order
         r["actions"] = _doc_actions("Material Request", r.name, r.workflow_state)
         out.append(r)
     return out
@@ -398,6 +441,7 @@ def mr_detail(name):
         "priority": doc.custom_priority,
         "schedule_date": doc.schedule_date,
         "remark": doc.custom_remark,
+        "rejection_remark": doc.get("custom_rejection_remark"),
         "workflow_state": doc.workflow_state,
         "status": doc.status,
         "docstatus": doc.docstatus,
@@ -408,6 +452,13 @@ def mr_detail(name):
             frappe.get_all(
                 "Purchase Order Item",
                 filters={"material_request": doc.name, "docstatus": 2},
+                limit_page_length=1,
+            )
+        ),
+        "has_active_order": bool(
+            frappe.get_all(
+                "Purchase Order Item",
+                filters={"material_request": doc.name, "docstatus": 1},
                 limit_page_length=1,
             )
         ),
@@ -492,22 +543,36 @@ def _is_platform_admin():
     return bool(set(frappe.get_roles()) & {"Administrator", "System Manager"})
 
 
+# A delegated admin who may edit EVERYTHING in the ProcureFlow Settings area
+# (all masters, PO terms, over-receipt tolerance and users) WITHOUT being a full
+# ERPNext System Manager. Master + T&C editing is granted to this role via normal
+# doctype permissions; the app-level toggles (tolerance, user management) are gated
+# in code below so they recognise this role too.
+SETTINGS_MANAGER_ROLE = "Settings Manager"
+
+
+def _can_manage_settings():
+    """May edit the app-level Settings toggles (over-receipt tolerance): a platform
+    admin or a delegated Settings Manager."""
+    return _is_platform_admin() or SETTINGS_MANAGER_ROLE in set(frappe.get_roles())
+
+
 @frappe.whitelist()
 def get_tolerance():
     """Over-receipt tolerance settings for the Settings panel."""
     return {
         "enabled": bool(frappe.db.get_single_value(TOLERANCE_DOCTYPE, "enable_global_tolerance")),
         "pct": flt(frappe.db.get_single_value(TOLERANCE_DOCTYPE, "global_tolerance_percentage")),
-        "can_edit": _is_platform_admin(),
+        "can_edit": _can_manage_settings(),
     }
 
 
 @frappe.whitelist()
 def save_tolerance(enabled, pct):
-    """Set the global over-receipt allowance. System-Manager only (it loosens
-    receipt validation)."""
-    if not _is_platform_admin():
-        frappe.throw(_("Only a System Manager can change the over-receipt tolerance."), frappe.PermissionError)
+    """Set the global over-receipt allowance. System Manager or Settings Manager
+    only (it loosens receipt validation)."""
+    if not _can_manage_settings():
+        frappe.throw(_("Only a System Manager or Settings Manager can change the over-receipt tolerance."), frappe.PermissionError)
     p = flt(pct)
     if p < 0 or p > 100:
         frappe.throw(_("Tolerance must be between 0 and 100%."))
@@ -517,6 +582,154 @@ def save_tolerance(enabled, pct):
     doc.save(ignore_permissions=True)
     frappe.db.commit()
     return {"enabled": bool(doc.enable_global_tolerance), "pct": flt(doc.global_tolerance_percentage)}
+
+
+# ===========================================================================
+# Approval routing (project -> MR approver)
+# ===========================================================================
+# A Settings UI over the separate `project_wise_mr_approval` app's mappings:
+# each row routes a project's Material Requests to a specific approver. If that
+# app isn't installed (its doctype missing) every endpoint degrades gracefully so
+# the Settings tab simply hides. Writes are code-gated (admins / Settings Manager
+# / Purchase Officer) then done with ignore_permissions, matching our other
+# settings endpoints.
+PWMA_APPROVER_DOCTYPE = "Project Wise MR Approver"
+
+
+def _approval_routing_available():
+    return bool(frappe.db.exists("DocType", PWMA_APPROVER_DOCTYPE))
+
+
+def _can_manage_approval_routing():
+    roles = set(frappe.get_roles())
+    return _is_platform_admin() or SETTINGS_MANAGER_ROLE in roles or "Purchase Officer" in roles
+
+
+def _require_approval_routing():
+    if not _approval_routing_available():
+        frappe.throw(_("The project-wise approval feature is not installed."))
+    if not _can_manage_approval_routing():
+        frappe.throw(_("You are not allowed to manage approval routing."), frappe.PermissionError)
+
+
+@frappe.whitelist()
+def approval_routing_context():
+    """Whether the project-wise MR approval feature is available and manageable —
+    drives whether the Settings 'Approvals' tab shows."""
+    return {
+        "available": _approval_routing_available(),
+        "can_manage": _can_manage_approval_routing(),
+    }
+
+
+@frappe.whitelist()
+def approval_mappings():
+    """All project -> approver mappings, with the approver's display name."""
+    if not _approval_routing_available():
+        return []
+    rows = frappe.get_all(
+        PWMA_APPROVER_DOCTYPE,
+        fields=["name", "project", "approver_user", "enabled", "modified"],
+        order_by="project asc",
+        limit_page_length=0,
+    )
+    user_names = list({r.approver_user for r in rows if r.approver_user})
+    names = {}
+    if user_names:
+        names = {
+            u.name: u.full_name
+            for u in frappe.get_all("User", filters={"name": ["in", user_names]}, fields=["name", "full_name"])
+        }
+    for r in rows:
+        r["approver_name"] = names.get(r.approver_user) or r.approver_user
+        r["enabled"] = bool(r.enabled)
+    return rows
+
+
+@frappe.whitelist()
+def approval_mapping_options():
+    """Projects + candidate approver users for the mapping pickers."""
+    if not _approval_routing_available():
+        return {"projects": [], "users": []}
+    projects = [
+        p.name for p in frappe.get_all("Project Master", fields=["name"], order_by="name asc", limit_page_length=0)
+    ]
+    users = [
+        {"value": u.name, "label": u.full_name or u.name}
+        for u in frappe.get_all(
+            "User",
+            filters={"enabled": 1, "user_type": "System User"},
+            fields=["name", "full_name"],
+            order_by="full_name asc",
+            limit_page_length=0,
+        )
+        if u.name not in ("Administrator", "Guest")
+    ]
+    return {"projects": projects, "users": users}
+
+
+@frappe.whitelist()
+def save_approval_mapping(name=None, project=None, approver_user=None, enabled=1):
+    """Create or update a project -> approver mapping."""
+    _require_approval_routing()
+    project = (project or "").strip()
+    approver_user = (approver_user or "").strip()
+    if not project:
+        frappe.throw(_("Select a project."))
+    if not approver_user:
+        frappe.throw(_("Select an approver."))
+    # One row per (project, approver) pair.
+    dup = frappe.db.exists(
+        PWMA_APPROVER_DOCTYPE,
+        {"project": project, "approver_user": approver_user, "name": ["!=", name or ""]},
+    )
+    if dup:
+        frappe.throw(_("That project and approver are already mapped."))
+    doc = frappe.get_doc(PWMA_APPROVER_DOCTYPE, name) if name else frappe.new_doc(PWMA_APPROVER_DOCTYPE)
+    doc.project = project
+    doc.approver_user = approver_user
+    doc.enabled = 1 if cint(enabled) else 0
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return {"name": doc.name}
+
+
+@frappe.whitelist()
+def save_approval_mappings(approver_user, projects, enabled=1):
+    """Bulk-map ONE approver to MANY projects in a single step — one row per
+    project. Skips (project, approver) pairs that already exist. Returns which
+    were created vs already present."""
+    _require_approval_routing()
+    approver_user = (approver_user or "").strip()
+    project_list = json.loads(projects) if isinstance(projects, str) else (projects or [])
+    project_list = [p for p in project_list if p]
+    if not approver_user:
+        frappe.throw(_("Select an approver."))
+    if not project_list:
+        frappe.throw(_("Select at least one project."))
+    created, skipped = [], []
+    for p in project_list:
+        if frappe.db.exists(PWMA_APPROVER_DOCTYPE, {"project": p, "approver_user": approver_user}):
+            skipped.append(p)
+            continue
+        doc = frappe.new_doc(PWMA_APPROVER_DOCTYPE)
+        doc.project = p
+        doc.approver_user = approver_user
+        doc.enabled = 1 if cint(enabled) else 0
+        doc.save(ignore_permissions=True)
+        created.append(p)
+    frappe.db.commit()
+    return {"created": created, "skipped": skipped}
+
+
+@frappe.whitelist()
+def delete_approval_mapping(name):
+    """Remove a project -> approver mapping."""
+    _require_approval_routing()
+    if frappe.db.exists(PWMA_APPROVER_DOCTYPE, name):
+        frappe.delete_doc(PWMA_APPROVER_DOCTYPE, name, ignore_permissions=True)
+        frappe.db.commit()
+    return {"deleted": True, "name": name}
 
 
 # ===========================================================================
@@ -775,10 +988,13 @@ def approved_material_requests():
 @frappe.whitelist()
 def mr_items_for_po(material_request):
     """Item lines of an approved MR, to pull into a Purchase Order."""
+    from procureflow.purchase_tax import get_item_gst_rate
+
     doc = frappe.get_doc("Material Request", material_request)
     doc.check_permission("read")
     out = []
     umap = _item_uoms_map([it.item_code for it in doc.items])
+    gst_cache = {}
     for it in doc.items:
         # Remaining qty in the line's transaction UOM. ordered_qty accumulates in
         # STOCK units (ERPNext maps PO Item.stock_qty -> MR Item.ordered_qty), so
@@ -786,6 +1002,8 @@ def mr_items_for_po(material_request):
         cf = flt(it.conversion_factor) or 1
         remaining_stock = flt(it.stock_qty) - flt(it.ordered_qty)
         remaining = (remaining_stock / cf) if remaining_stock > 0 else 0
+        if it.item_code not in gst_cache:
+            gst_cache[it.item_code] = flt(get_item_gst_rate(it.item_code))
         out.append(
             {
                 "item_code": it.item_code,
@@ -793,6 +1011,9 @@ def mr_items_for_po(material_request):
                 "uom": it.uom,
                 "uoms": umap.get(it.item_code) or [{"uom": it.uom, "conversion_factor": 1}],
                 "qty": remaining,
+                # Default GST % for the item (from its tax template) so the mobile PO
+                # form can prefill it without a per-item round-trip.
+                "gst_percent": gst_cache[it.item_code],
                 "specification": it.get("custom_specification"),
                 "remark": it.get("custom_remark"),
                 "material_request": doc.name,
@@ -892,7 +1113,10 @@ def save_purchase_order(data):
                 "rate": flt(row.get("rate")),
                 "custom_gst_percent": flt(row.get("gst_percent")),
                 "custom_rate_with_tax": flt(row.get("rate_with_tax")),
-                "schedule_date": row.get("schedule_date") or doc.schedule_date,
+                # Inherit the header Required-by so ERPNext's validate_schedule_date
+                # (header = min(item dates)) recomputes to the SAME value — otherwise
+                # a changed header gets reverted to the stale line dates on save.
+                "schedule_date": doc.schedule_date,
                 "warehouse": set_warehouse,
                 "custom_specification": row.get("specification"),
                 "custom_remark": row.get("remark"),
@@ -949,6 +1173,7 @@ def po_list(limit=100):
         order_by="modified desc",
         limit_page_length=int(limit),
     )
+    rows = _hide_amended_originals("Purchase Order", rows)
     names = [r.name for r in rows]
     counts = {}
     if names:
@@ -980,6 +1205,9 @@ def po_detail(name):
                 "gst_percent": it.get("custom_gst_percent"),
                 "rate_with_tax": it.get("custom_rate_with_tax"),
                 "amount": it.amount,
+                # How much of this line has been received so far (for the
+                # "received X of Y" / remaining display on a partially-received PO).
+                "received_qty": flt(it.get("received_qty")),
                 "specification": it.get("custom_specification"),
                 "remark": it.get("custom_remark"),
                 "schedule_date": it.schedule_date,
@@ -1081,6 +1309,38 @@ def cancel_doc(doctype, name):
         raise frappe.PermissionError(_("You are not permitted to cancel this document."))
     doc.cancel()
     return {"name": doc.name, "workflow_state": doc.get("workflow_state"), "docstatus": doc.docstatus}
+
+
+def _hide_amended_originals(doctype, rows):
+    """Drop CANCELLED rows that have been amended — the amended copy is the live
+    document, and showing both the dead original and its replacement clutters the
+    list. The original is still reachable from the amended doc's audit trail."""
+    cancelled = [r.get("name") for r in rows if r.get("docstatus") == 2]
+    if not cancelled:
+        return rows
+    superseded = {
+        r.amended_from
+        for r in frappe.get_all(
+            doctype, filters={"amended_from": ["in", cancelled]}, fields=["amended_from"], limit_page_length=0
+        )
+    }
+    return [r for r in rows if r.get("name") not in superseded]
+
+
+@frappe.whitelist()
+def delete_doc(doctype, name):
+    """Permanently delete a CANCELLED MR/PO/PR (docstatus 2). Respects frappe delete
+    perms. Only a cancelled doc may be deleted — a submitted one must be cancelled
+    first (matching ERPNext's own rule)."""
+    if doctype not in ("Material Request", "Purchase Order", "Purchase Receipt"):
+        frappe.throw(_("Unsupported document type."))
+    doc = frappe.get_doc(doctype, name)
+    if doc.docstatus != 2:
+        frappe.throw(_("Only a cancelled document can be deleted. Cancel it first."))
+    if not frappe.has_permission(doctype, "delete", doc):
+        raise frappe.PermissionError(_("You are not permitted to delete this document."))
+    frappe.delete_doc(doctype, name)
+    return {"deleted": True, "name": name}
 
 
 @frappe.whitelist()
@@ -1265,8 +1525,12 @@ def create_receipt(data):
     invoice_image = data.get("invoice_image")
     if material_image and pr.meta.has_field("custom_add_material"):
         pr.custom_add_material = material_image
+        if pr.meta.has_field("custom_material_receipt_datetime"):
+            pr.custom_material_receipt_datetime = now_datetime()
     if invoice_image and pr.meta.has_field("custom_add_invoice"):
         pr.custom_add_invoice = invoice_image
+        if pr.meta.has_field("custom_material_invoice_datetime"):
+            pr.custom_material_invoice_datetime = now_datetime()
 
     keep = []
     for it in pr.items:
@@ -1330,6 +1594,22 @@ def pr_detail(name):
     doc = frappe.get_doc("Purchase Receipt", name)
     doc.check_permission("read")
     info = _pr_pay_info(name)
+    # ALL of the receipt's attachments: the two dedicated photo fields plus any
+    # plain File attachments (e.g. receipts made in the desk attach files instead
+    # of filling the custom fields — those were invisible in the app before).
+    attachments = []
+    for u in (doc.get("custom_add_material"), doc.get("custom_add_invoice")):
+        if u and u not in attachments:
+            attachments.append(u)
+    for f in frappe.get_all(
+        "File",
+        filters={"attached_to_doctype": "Purchase Receipt", "attached_to_name": name},
+        fields=["file_url"],
+        order_by="creation asc",
+        limit_page_length=0,
+    ):
+        if f.file_url and f.file_url not in attachments:
+            attachments.append(f.file_url)
     return {
         "name": doc.name,
         "supplier": doc.supplier,
@@ -1344,6 +1624,8 @@ def pr_detail(name):
         "outstanding": info["outstanding"],
         "material_image": doc.get("custom_add_material"),
         "invoice_image": doc.get("custom_add_invoice"),
+        "attachments": attachments,
+        "can_delete": bool(doc.docstatus == 2 and frappe.has_permission("Purchase Receipt", "delete", doc)),
         "items": [
             {"item_code": it.item_code, "item_name": it.item_name, "qty": it.qty, "uom": it.uom, "rate": it.rate, "amount": it.amount}
             for it in doc.items
@@ -1470,6 +1752,55 @@ def create_master(doctype, values):
     doc.insert()
     frappe.db.commit()
     return doc.name
+
+
+@frappe.whitelist()
+def delete_master(doctype, name):
+    """Delete a master record from the Settings page. Permission-checked; only the
+    whitelisted master doctypes. Blocked with a clear message if the record is still
+    linked to other documents (so you can't orphan transactions)."""
+    if doctype not in MASTER_DOCTYPES:
+        frappe.throw(_("Cannot delete {0}.").format(doctype))
+    if not frappe.has_permission(doctype, "delete"):
+        frappe.throw(_("You are not allowed to delete {0}.").format(doctype))
+    if not frappe.db.exists(doctype, name):
+        return {"deleted": True, "name": name}
+    try:
+        frappe.delete_doc(doctype, name)
+    except frappe.LinkExistsError:
+        frappe.throw(
+            _("Can't delete '{0}' — it's still used by other records. Remove or reassign those first.").format(name)
+        )
+    frappe.db.commit()
+    return {"deleted": True, "name": name}
+
+
+@frappe.whitelist()
+def delete_masters(doctype, names):
+    """Bulk-delete master records from the Settings page. Deletes what it can and
+    reports what it couldn't (e.g. still linked to transactions) instead of failing
+    the whole batch on the first in-use record."""
+    if doctype not in MASTER_DOCTYPES:
+        frappe.throw(_("Cannot delete {0}.").format(doctype))
+    if not frappe.has_permission(doctype, "delete"):
+        frappe.throw(_("You are not allowed to delete {0}.").format(doctype))
+    names = _loads(names) or []
+    deleted, failed = [], {}
+    for n in names:
+        if not frappe.db.exists(doctype, n):
+            deleted.append(n)
+            continue
+        try:
+            frappe.delete_doc(doctype, n)
+            deleted.append(n)
+        except frappe.LinkExistsError:
+            frappe.db.rollback()
+            failed[n] = _("still in use")
+        except Exception as e:
+            frappe.db.rollback()
+            failed[n] = str(e)[:120]
+    frappe.db.commit()
+    return {"deleted": deleted, "failed": failed}
 
 
 @frappe.whitelist()
@@ -1687,9 +2018,15 @@ _CAP_ADMIN_ROLES = {"Administrator", "System Manager", "Purchase Manager"}
 _CAP_CREATE_MR_ROLES = {"Material Request Creator", "Purchase User", "Supervisor", "Purchase Officer"}
 _CAP_RECEIVE_ROLES = {"Supervisor", "Purchase User", "Purchase Officer"}
 _CAP_APPROVE_ROLES = {"Material Request Approval", "PO Approver"}
-_CAP_PO_BROWSE_ROLES = {"Purchase Officer", "PO Approver"}
+# Supervisors may browse POs too — the permission layer scopes them to ONLY the
+# POs they are the assigned receiver of (procureflow.api.purchase_order_*).
+_CAP_PO_BROWSE_ROLES = {"Purchase Officer", "PO Approver", "Supervisor"}
+# Creating a Purchase Order (mobile + web) — Purchase Officers (+ admins).
+_CAP_CREATE_PO_ROLES = {"Purchase Officer"}
 _CAP_PR_BROWSE_ROLES = {"Purchase Officer", "PO Approver", "Supervisor"}
 _CAP_STOCK_ROLES = {"Stock User", "Stock Manager"}
+# Payments — recording/viewing Procureflow Payment Entries (finance).
+_CAP_PAY_ROLES = {"Accounts User"}
 # Reports (web-only) — gated to this role plus admins. Holders also see full
 # report/dashboard data (Report Viewer is privileged in get_dashboard_scope).
 _CAP_REPORTS_ROLES = {"Report Viewer"}
@@ -1714,8 +2051,12 @@ def capabilities():
         "read_pr": has(_CAP_PR_BROWSE_ROLES),
         "read_stock": has(_CAP_STOCK_ROLES),
         "approve": has(_CAP_APPROVE_ROLES),
+        "create_po": has(_CAP_CREATE_PO_ROLES),
+        "pay": has(_CAP_PAY_ROLES),
         "reports": has(_CAP_REPORTS_ROLES),
-        "manage_users": bool(roles & _USER_ADMIN_ROLES) or USER_MANAGER_ROLE in roles,
+        "manage_users": bool(roles & _USER_ADMIN_ROLES) or bool(roles & {USER_MANAGER_ROLE, SETTINGS_MANAGER_ROLE}),
+        # Settings nav — admins, or a delegated User/Settings Manager.
+        "settings": is_admin or bool(roles & _USER_ADMIN_ROLES) or bool(roles & {USER_MANAGER_ROLE, SETTINGS_MANAGER_ROLE}),
         "email_configured": _email_configured(),
     }
 
@@ -1748,11 +2089,12 @@ _MANAGEABLE_ROLES = [
     ("Supervisor", "Site Supervisor", "Mobile app; can be a PO receiver and receive material."),
     ("Report Viewer", "Report Viewer", "Access reports & dashboards (full data)."),
     ("Accounts User", "Accounts / Payments User", "Record and view payments."),
+    ("Settings Manager", "Settings Manager — full settings access", "Edit ALL settings: catalog, suppliers & projects, documents, tolerance, and users. Grant sparingly."),
     ("Purchase Manager", "Purchase Manager — full access", "FULL access to everything in the app. Grant sparingly."),
 ]
 _MANAGEABLE_ROLE_NAMES = {r[0] for r in _MANAGEABLE_ROLES}
-# Powerful roles only a platform admin may grant (delegated User Managers cannot).
-_ELEVATED_ROLES = {"Purchase Manager"}
+# Powerful roles only a platform admin may grant (delegated User/Settings Managers cannot).
+_ELEVATED_ROLES = {"Purchase Manager", "Settings Manager"}
 
 
 def _is_user_admin():
@@ -1761,7 +2103,7 @@ def _is_user_admin():
 
 def _can_manage_users():
     roles = set(frappe.get_roles())
-    return bool(roles & _USER_ADMIN_ROLES) or USER_MANAGER_ROLE in roles
+    return bool(roles & _USER_ADMIN_ROLES) or bool(roles & {USER_MANAGER_ROLE, SETTINGS_MANAGER_ROLE})
 
 
 def _require_user_manager():

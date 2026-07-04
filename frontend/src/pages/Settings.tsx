@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useFrappeCreateDoc, useFrappeGetCall, useFrappeGetDoc, useFrappeGetDocList, useFrappePostCall } from 'frappe-react-sdk';
-import { API, type AssignableRole, type Capabilities, type ManagedUser, type Tolerance } from '../lib/api';
+import { API, type ApprovalMapping, type ApprovalMappingOptions, type ApprovalRoutingContext, type AssignableRole, type Capabilities, type ManagedUser, type Tolerance } from '../lib/api';
 import { Card, CHead, EmptyMsg, Modal } from '../components/ui';
 import { Field, SearchSelect, SelectInput, TextArea, TextInput } from '../components/form';
 import { Icon, type IconName } from '../components/Icon';
@@ -25,6 +25,105 @@ function newAction(canCreate: boolean, open: () => void) {
 		<a href="#" onClick={(e) => { e.preventDefault(); open(); }}>
 			New
 		</a>
+	);
+}
+
+/** Delete a master record — shown in an edit modal's footer. Two-step confirm;
+ *  surfaces the backend "still in use" message instead of failing silently. */
+function DeleteMasterButton({ doctype, name, onDeleted }: { doctype: string; name: string; onDeleted: () => void }) {
+	const { call, loading } = useFrappePostCall<{ message: unknown }>(API.deleteMaster);
+	const toast = useToast();
+	const [confirm, setConfirm] = useState(false);
+	const [err, setErr] = useState('');
+	async function del() {
+		setErr('');
+		try {
+			await call({ doctype, name });
+			toast.success('Deleted');
+			onDeleted();
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+	if (!confirm) {
+		return (
+			<button className="btn danger" type="button" onClick={() => setConfirm(true)}>
+				<Icon name="trash" size={14} /> Delete
+			</button>
+		);
+	}
+	return (
+		<span style={{ display: 'inline-flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+			{err && <span className="ferr">{err}</span>}
+			<span className="dim" style={{ fontSize: 12 }}>Delete this?</span>
+			<button className="btn" type="button" onClick={() => setConfirm(false)} disabled={loading}>No</button>
+			<button className="btn danger" type="button" onClick={() => void del()} disabled={loading}>
+				{loading ? 'Deleting…' : 'Yes, delete'}
+			</button>
+		</span>
+	);
+}
+
+/** Row-selection state for a master table's bulk actions. */
+function useSel() {
+	const [sel, setSel] = useState<Set<string>>(new Set());
+	const toggle = (n: string) =>
+		setSel((s) => {
+			const x = new Set(s);
+			if (x.has(n)) x.delete(n);
+			else x.add(n);
+			return x;
+		});
+	const clear = () => setSel(new Set());
+	return { sel, toggle, clear };
+}
+
+/** Checkbox cell for a master row — stops the row's open-editor click. */
+function SelCell({ name, sel, toggle }: { name: string; sel: Set<string>; toggle: (n: string) => void }) {
+	return (
+		<td style={{ width: 34 }} onClick={(e) => e.stopPropagation()}>
+			<input type="checkbox" checked={sel.has(name)} onChange={() => toggle(name)} aria-label={`Select ${name}`} />
+		</td>
+	);
+}
+
+/** "N selected — Delete selected" bar for bulk-deleting master records. Deletes
+ *  what it can; records still in use are reported, not silently dropped. */
+function BulkDeleteBar({ doctype, sel, onDone }: { doctype: string; sel: Set<string>; onDone: () => void }) {
+	const { call, loading } = useFrappePostCall<{ message: { deleted: string[]; failed: Record<string, string> } }>(API.deleteMasters);
+	const toast = useToast();
+	const [confirm, setConfirm] = useState(false);
+	if (sel.size === 0) return null;
+	async function del() {
+		try {
+			const r = await call({ doctype, names: Array.from(sel) });
+			const dn = r.message.deleted.length;
+			const fails = Object.keys(r.message.failed);
+			if (dn) toast.success(`${dn} deleted${fails.length ? ` · ${fails.length} still in use: ${fails.slice(0, 3).join(', ')}${fails.length > 3 ? '…' : ''}` : ''}`);
+			else toast.error(`Nothing deleted — still in use: ${fails.slice(0, 3).join(', ')}${fails.length > 3 ? '…' : ''}`);
+			onDone();
+		} catch (e) {
+			toast.error(parseServerError(e));
+		}
+		setConfirm(false);
+	}
+	return (
+		<div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 2px' }}>
+			<span className="dim" style={{ fontSize: 12.5 }}>{sel.size} selected</span>
+			<span style={{ flex: 1 }} />
+			{confirm ? (
+				<>
+					<button className="btn" onClick={() => setConfirm(false)} disabled={loading}>Cancel</button>
+					<button className="btn danger" onClick={() => void del()} disabled={loading}>
+						{loading ? 'Deleting…' : `Delete ${sel.size}`}
+					</button>
+				</>
+			) : (
+				<button className="btn danger" onClick={() => setConfirm(true)}>
+					<Icon name="trash" size={14} /> Delete selected
+				</button>
+			)}
+		</div>
 	);
 }
 
@@ -121,6 +220,7 @@ function SimpleMaster({
 	const [val, setVal] = useState('');
 	const [err, setErr] = useState('');
 	const [q, setQ] = useState('');
+	const bulk = useSel();
 	const rows = data ?? [];
 	const shown = useMemo(() => filterRows(rows, q, [lf, 'name']), [rows, q, lf]);
 
@@ -149,15 +249,17 @@ function SimpleMaster({
 			) : (
 				<>
 					<SearchRow q={q} setQ={setQ} shown={shown.length} total={rows.length} />
+					{canCreate && <BulkDeleteBar doctype={doctype} sel={bulk.sel} onDone={() => { bulk.clear(); mutate(); }} />}
 					{shown.length === 0 ? (
 						<EmptyMsg title="No matches" text="Adjust your search." />
 					) : (
 						<div className="tablescroll">
 							<table className={canCreate ? 'clickable' : undefined}>
-								<thead><tr><th>{noun}</th></tr></thead>
+								<thead><tr>{canCreate && <th style={{ width: 34 }} />}<th>{noun}</th></tr></thead>
 								<tbody>
 									{shown.map((r) => (
 										<tr key={r.name} onClick={canCreate ? () => openEdit(r) : undefined}>
+											{canCreate && <SelCell name={r.name} sel={bulk.sel} toggle={bulk.toggle} />}
 											<td className="c1">{String(r[lf] ?? r.name)}</td>
 										</tr>
 									))}
@@ -178,6 +280,7 @@ function SimpleMaster({
 					</div>
 					<div className="formfoot">
 						{err && <span className="ferr">{err}</span>}
+						{edit && <DeleteMasterButton doctype={doctype} name={edit.name} onDeleted={() => { close(); mutate(); }} />}
 						<span className="spacer" />
 						<button className="btn" onClick={close}>Cancel</button>
 						<button className="btn primary" disabled={loading} onClick={() => void save()}>
@@ -207,6 +310,7 @@ function SubCategoryPanel({ canCreate }: { canCreate: boolean }) {
 	const [cat, setCat] = useState('');
 	const [err, setErr] = useState('');
 	const [q, setQ] = useState('');
+	const bulk = useSel();
 	const rows = data ?? [];
 	const shown = useMemo(() => filterRows(rows, q, ['sub_category_name', 'material_category', 'name']), [rows, q]);
 
@@ -236,15 +340,17 @@ function SubCategoryPanel({ canCreate }: { canCreate: boolean }) {
 			) : (
 				<>
 					<SearchRow q={q} setQ={setQ} shown={shown.length} total={rows.length} />
+					{canCreate && <BulkDeleteBar doctype="Material Sub Category" sel={bulk.sel} onDone={() => { bulk.clear(); mutate(); }} />}
 					{shown.length === 0 ? (
 						<EmptyMsg title="No matches" text="Adjust your search." />
 					) : (
 						<div className="tablescroll">
 							<table className={canCreate ? 'clickable' : undefined}>
-								<thead><tr><th>Sub-category</th><th>Category</th></tr></thead>
+								<thead><tr>{canCreate && <th style={{ width: 34 }} />}<th>Sub-category</th><th>Category</th></tr></thead>
 								<tbody>
 									{shown.map((r) => (
 										<tr key={r.name} onClick={canCreate ? () => openEdit(r) : undefined}>
+											{canCreate && <SelCell name={r.name} sel={bulk.sel} toggle={bulk.toggle} />}
 											<td className="c1">{String(r.sub_category_name ?? r.name)}</td>
 											<td className="dim">{String(r.material_category ?? '—')}</td>
 										</tr>
@@ -267,6 +373,7 @@ function SubCategoryPanel({ canCreate }: { canCreate: boolean }) {
 					</div>
 					<div className="formfoot">
 						{err && <span className="ferr">{err}</span>}
+						{edit && <DeleteMasterButton doctype="Material Sub Category" name={edit.name} onDeleted={() => { close(); mutate(); }} />}
 						<span className="spacer" />
 						<button className="btn" onClick={close}>Cancel</button>
 						<button className="btn primary" disabled={loading} onClick={() => void save()}>
@@ -298,6 +405,7 @@ function ProjectPanel({ canCreate }: { canCreate: boolean }) {
 	const [store, setStore] = useState('');
 	const [err, setErr] = useState('');
 	const [q, setQ] = useState('');
+	const bulk = useSel();
 	const rows = data ?? [];
 	const shown = useMemo(() => filterRows(rows, q, ['project_name', 'company_name', 'store_name', 'name']), [rows, q]);
 
@@ -326,15 +434,17 @@ function ProjectPanel({ canCreate }: { canCreate: boolean }) {
 			) : (
 				<>
 					<SearchRow q={q} setQ={setQ} shown={shown.length} total={rows.length} />
+					{canCreate && <BulkDeleteBar doctype="Project Master" sel={bulk.sel} onDone={() => { bulk.clear(); mutate(); }} />}
 					{shown.length === 0 ? (
 						<EmptyMsg title="No matches" text="Adjust your search." />
 					) : (
 						<div className="tablescroll">
 							<table className={canCreate ? 'clickable' : undefined}>
-								<thead><tr><th>Project</th><th>Company</th><th>Store</th></tr></thead>
+								<thead><tr>{canCreate && <th style={{ width: 34 }} />}<th>Project</th><th>Company</th><th>Store</th></tr></thead>
 								<tbody>
 									{shown.map((r) => (
 										<tr key={r.name} onClick={canCreate ? () => openEdit(r) : undefined}>
+											{canCreate && <SelCell name={r.name} sel={bulk.sel} toggle={bulk.toggle} />}
 											<td className="c1">{String(r.project_name ?? r.name)}</td>
 											<td className="dim">{String(r.company_name ?? '—')}</td>
 											<td className="dim">{String(r.store_name ?? '—')}</td>
@@ -363,6 +473,7 @@ function ProjectPanel({ canCreate }: { canCreate: boolean }) {
 					</div>
 					<div className="formfoot">
 						{err && <span className="ferr">{err}</span>}
+						{edit && <DeleteMasterButton doctype="Project Master" name={edit.name} onDeleted={() => { close(); mutate(); }} />}
 						<span className="spacer" />
 						<button className="btn" onClick={close}>Cancel</button>
 						<button className="btn primary" disabled={loading} onClick={() => void save()}>
@@ -395,6 +506,7 @@ function StorePanel({ canCreate }: { canCreate: boolean }) {
 	const [parent, setParent] = useState('');
 	const [err, setErr] = useState('');
 	const [q, setQ] = useState('');
+	const bulk = useSel();
 	const rows = data ?? [];
 	const shown = useMemo(() => filterRows(rows, q, ['warehouse_name', 'company', 'name']), [rows, q]);
 
@@ -426,15 +538,17 @@ function StorePanel({ canCreate }: { canCreate: boolean }) {
 			) : (
 				<>
 					<SearchRow q={q} setQ={setQ} shown={shown.length} total={rows.length} />
+					{canCreate && <BulkDeleteBar doctype="Warehouse" sel={bulk.sel} onDone={() => { bulk.clear(); mutate(); }} />}
 					{shown.length === 0 ? (
 						<EmptyMsg title="No matches" text="Adjust your search." />
 					) : (
 						<div className="tablescroll">
 							<table className={canCreate ? 'clickable' : undefined}>
-								<thead><tr><th>Store</th><th>Company</th></tr></thead>
+								<thead><tr>{canCreate && <th style={{ width: 34 }} />}<th>Store</th><th>Company</th></tr></thead>
 								<tbody>
 									{shown.map((r) => (
 										<tr key={r.name} onClick={canCreate ? () => openEdit(r) : undefined}>
+											{canCreate && <SelCell name={r.name} sel={bulk.sel} toggle={bulk.toggle} />}
 											<td className="c1">{String(r.warehouse_name ?? r.name)}</td>
 											<td className="dim">{String(r.company ?? '—')}</td>
 										</tr>
@@ -462,6 +576,7 @@ function StorePanel({ canCreate }: { canCreate: boolean }) {
 					</div>
 					<div className="formfoot">
 						{err && <span className="ferr">{err}</span>}
+						{edit && <DeleteMasterButton doctype="Warehouse" name={edit.name} onDeleted={() => { close(); mutate(); }} />}
 						<span className="spacer" />
 						<button className="btn" onClick={close}>Cancel</button>
 						<button className="btn primary" disabled={loading} onClick={() => void save()}>
@@ -496,6 +611,7 @@ function SupplierPanel({ canCreate }: { canCreate: boolean }) {
 	const [group, setGroup] = useState('');
 	const [err, setErr] = useState('');
 	const [q, setQ] = useState('');
+	const bulk = useSel();
 	const rows = data ?? [];
 	const shown = useMemo(() => filterRows(rows, q, ['supplier_name', 'supplier_group', 'name']), [rows, q]);
 
@@ -524,15 +640,17 @@ function SupplierPanel({ canCreate }: { canCreate: boolean }) {
 			) : (
 				<>
 					<SearchRow q={q} setQ={setQ} shown={shown.length} total={rows.length} />
+					{canCreate && <BulkDeleteBar doctype="Supplier" sel={bulk.sel} onDone={() => { bulk.clear(); mutate(); }} />}
 					{shown.length === 0 ? (
 						<EmptyMsg title="No matches" text="Adjust your search." />
 					) : (
 						<div className="tablescroll">
 							<table className={canCreate ? 'clickable' : undefined}>
-								<thead><tr><th>Supplier</th><th>Group</th></tr></thead>
+								<thead><tr>{canCreate && <th style={{ width: 34 }} />}<th>Supplier</th><th>Group</th></tr></thead>
 								<tbody>
 									{shown.map((r) => (
 										<tr key={r.name} onClick={canCreate ? () => openEdit(r) : undefined}>
+											{canCreate && <SelCell name={r.name} sel={bulk.sel} toggle={bulk.toggle} />}
 											<td className="c1">{String(r.supplier_name ?? r.name)}</td>
 											<td className="dim">{String(r.supplier_group ?? '—')}</td>
 										</tr>
@@ -559,6 +677,7 @@ function SupplierPanel({ canCreate }: { canCreate: boolean }) {
 					</div>
 					<div className="formfoot">
 						{err && <span className="ferr">{err}</span>}
+						{edit && <DeleteMasterButton doctype="Supplier" name={edit.name} onDeleted={() => { close(); mutate(); }} />}
 						<span className="spacer" />
 						<button className="btn" onClick={close}>Cancel</button>
 						<button className="btn primary" disabled={loading} onClick={() => void save()}>
@@ -605,6 +724,7 @@ function ItemPanel({ canCreate }: { canCreate: boolean }) {
 	const [modal, setModal] = useState(false);
 	const [edit, setEdit] = useState<Row | null>(null);
 	const [q, setQ] = useState('');
+	const bulk = useSel();
 	const rows = data ?? [];
 	const shown = useMemo(() => filterRows(rows, q, ['item_name', 'name', 'custom_category', 'custom_sub_category', 'stock_uom']), [rows, q]);
 
@@ -616,17 +736,19 @@ function ItemPanel({ canCreate }: { canCreate: boolean }) {
 			) : (
 				<>
 					<SearchRow q={q} setQ={setQ} shown={shown.length} total={rows.length} />
+					{canCreate && <BulkDeleteBar doctype="Item" sel={bulk.sel} onDone={() => { bulk.clear(); mutate(); }} />}
 					{shown.length === 0 ? (
 						<EmptyMsg title="No matches" text="Adjust your search." />
 					) : (
 						<div className="tablescroll">
 							<table className={canCreate ? 'clickable' : undefined}>
 								<thead>
-									<tr><th>Item</th><th>Category</th><th>Sub-category</th><th>UOM</th></tr>
+									<tr>{canCreate && <th style={{ width: 34 }} />}<th>Item</th><th>Category</th><th>Sub-category</th><th>UOM</th></tr>
 								</thead>
 								<tbody>
 									{shown.map((r) => (
 										<tr key={r.name} onClick={canCreate ? () => { setEdit(r); setModal(true); } : undefined}>
+											{canCreate && <SelCell name={r.name} sel={bulk.sel} toggle={bulk.toggle} />}
 											<td className="c1">
 												{String(r.item_name ?? r.name)}
 												<span className="id" style={{ marginLeft: 8 }}>{r.name}</span>
@@ -814,6 +936,7 @@ function ItemModal({
 			</div>
 			<div className="formfoot">
 				{err && <span className="ferr">{err}</span>}
+				{editRow && <DeleteMasterButton doctype="Item" name={editRow.name} onDeleted={onSaved} />}
 				<span className="spacer" />
 				<button className="btn" onClick={onClose}>Cancel</button>
 				<button className="btn primary" disabled={loading} onClick={() => void save()}>
@@ -1191,10 +1314,184 @@ function UsersPanel() {
 	);
 }
 
+/* ----------------------------- Approval routing ----------------------------- */
+
+// Manages the separate project_wise_mr_approval app's project -> approver mappings:
+// each project's Material Requests route to the mapped approver (Purchase Officers
+// can approve every project). The whole tab is hidden when that app isn't installed.
+function ApprovalRoutingPanel() {
+	const listRes = useFrappeGetCall<{ message: ApprovalMapping[] }>(API.approvalMappings, {}, 'pf:appr-maps');
+	const optRes = useFrappeGetCall<{ message: ApprovalMappingOptions }>(API.approvalMappingOptions, {}, 'pf:appr-opts');
+	const { call: saveCall, loading: saving } = useFrappePostCall<{ message: { name: string } }>(API.saveApprovalMapping);
+	const { call: bulkCall, loading: bulkSaving } = useFrappePostCall<{ message: { created: string[]; skipped: string[] } }>(API.saveApprovalMappings);
+	const { call: delCall, loading: deleting } = useFrappePostCall<{ message: unknown }>(API.deleteApprovalMapping);
+	const toast = useToast();
+	const rows = listRes.data?.message ?? [];
+	const options = optRes.data?.message ?? { projects: [], users: [] };
+	const [modal, setModal] = useState(false);
+	const [edit, setEdit] = useState<ApprovalMapping | null>(null);
+	const [project, setProject] = useState('');
+	const [projectsSel, setProjectsSel] = useState<string[]>([]); // multiselect on create
+	const [approver, setApprover] = useState('');
+	const [enabled, setEnabled] = useState(true);
+	const [err, setErr] = useState('');
+	const [q, setQ] = useState('');
+	const shown = useMemo(
+		() => filterRows(rows as unknown as Row[], q, ['project', 'approver_user', 'approver_name', 'name']) as unknown as ApprovalMapping[],
+		[rows, q],
+	);
+
+	function openNew() { setErr(''); setEdit(null); setProject(''); setProjectsSel([]); setApprover(''); setEnabled(true); setModal(true); }
+	function openEdit(r: ApprovalMapping) { setErr(''); setEdit(r); setProject(r.project); setProjectsSel([]); setApprover(r.approver_user); setEnabled(r.enabled); setModal(true); }
+	function close() { setModal(false); setEdit(null); }
+	function addProject(p: string) { if (p && !projectsSel.includes(p)) setProjectsSel((s) => [...s, p]); }
+	function removeProject(p: string) { setProjectsSel((s) => s.filter((x) => x !== p)); }
+
+	async function save() {
+		setErr('');
+		if (!approver) return setErr('Select an approver.');
+		try {
+			if (edit) {
+				if (!project) return setErr('Select a project.');
+				await saveCall({ name: edit.name, project, approver_user: approver, enabled: enabled ? 1 : 0 });
+				toast.success('Mapping updated');
+			} else {
+				if (projectsSel.length === 0) return setErr('Add at least one project.');
+				const r = await bulkCall({ approver_user: approver, projects: projectsSel, enabled: enabled ? 1 : 0 });
+				const c = r.message.created.length;
+				const s = r.message.skipped.length;
+				toast.success(`${c} mapping${c === 1 ? '' : 's'} added${s ? ` · ${s} already existed` : ''}`);
+			}
+			close();
+			listRes.mutate();
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
+	async function remove() {
+		if (!edit) return;
+		setErr('');
+		try {
+			await delCall({ name: edit.name });
+			toast.success('Mapping removed');
+			close();
+			listRes.mutate();
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
+	return (
+		<Card>
+			<CHead
+				icon="shield-check"
+				title="Approval routing"
+				count={rows.length}
+				action={<a href="#" onClick={(e) => { e.preventDefault(); openNew(); }}>New mapping</a>}
+			/>
+			<div className="sub" style={{ margin: '0 2px 12px' }}>
+				<b>Applies to Material Requests only.</b> Route each project’s Material&nbsp;Request approvals to a specific person — a mapped approver only sees Approve / Reject for their own projects, and Purchase Officers can approve every project. (Purchase Order approvals are handled separately by the PO&nbsp;Approver role and are not affected by these mappings.)
+			</div>
+			{rows.length === 0 ? (
+				<EmptyMsg title="No approver mappings" text="Add a project → approver mapping so its requests route to the right person." />
+			) : (
+				<>
+					<SearchRow q={q} setQ={setQ} shown={shown.length} total={rows.length} />
+					{shown.length === 0 ? (
+						<EmptyMsg title="No matches" text="Adjust your search." />
+					) : (
+						<div className="tablescroll">
+							<table className="clickable">
+								<thead><tr><th>Project</th><th>Approver</th><th>Status</th></tr></thead>
+								<tbody>
+									{shown.map((r) => (
+										<tr key={r.name} onClick={() => openEdit(r)}>
+											<td className="c1">{r.project}</td>
+											<td className="dim">{r.approver_name}</td>
+											<td>{r.enabled ? <span className="rolepill ok">Enabled</span> : <span className="rolepill off">Disabled</span>}</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
+					)}
+				</>
+			)}
+			{modal && (
+				<Modal title={edit ? 'Edit approver mapping' : 'New approver mapping'} icon="shield-check" onClose={close}>
+					<div className="sub" style={{ margin: '-2px 2px 12px', fontSize: 12 }}>
+						Applies to <b>Material Request</b> approvals for the selected project{edit ? '' : '(s)'}.
+					</div>
+					<div className="formgrid">
+						<div className="span2">
+							<Field label="Approver" required hint="This person will approve/reject the selected projects’ material requests.">
+								<SearchSelect value={approver} onChange={setApprover} options={options.users} placeholder="Select approver…" />
+							</Field>
+						</div>
+						{edit ? (
+							<div className="span2">
+								<Field label="Project" required>
+									<SearchSelect value={project} onChange={setProject} options={options.projects.map((p) => ({ value: p }))} placeholder="Select project…" />
+								</Field>
+							</div>
+						) : (
+							<div className="span2">
+								<Field label="Projects" required hint="Add every project this approver handles — one mapping is created for each.">
+									<SearchSelect
+										value=""
+										onChange={addProject}
+										options={options.projects.filter((p) => !projectsSel.includes(p)).map((p) => ({ value: p }))}
+										placeholder="Add a project…"
+									/>
+									{projectsSel.length > 0 && (
+										<div className="rolepills" style={{ marginTop: 8 }}>
+											{projectsSel.map((p) => (
+												<span key={p} className="rolepill" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+													{p}
+													<button
+														type="button"
+														onClick={() => removeProject(p)}
+														aria-label={`Remove ${p}`}
+														style={{ border: 0, background: 'none', cursor: 'pointer', color: 'inherit', display: 'inline-flex', padding: 0 }}
+													>
+														<Icon name="close" size={11} />
+													</button>
+												</span>
+											))}
+										</div>
+									)}
+								</Field>
+							</div>
+						)}
+						<Field label="Status">
+							<SelectInput value={enabled ? '1' : '0'} onChange={(v) => setEnabled(v === '1')} options={[{ value: '1', label: 'Enabled' }, { value: '0', label: 'Disabled' }]} />
+						</Field>
+					</div>
+					<div className="formfoot">
+						{err && <span className="ferr">{err}</span>}
+						{edit && (
+							<button className="btn danger" disabled={deleting} onClick={() => void remove()}>
+								{deleting ? 'Removing…' : 'Delete'}
+							</button>
+						)}
+						<span className="spacer" />
+						<button className="btn" onClick={close}>Cancel</button>
+						<button className="btn primary" disabled={saving || bulkSaving} onClick={() => void save()}>
+							{saving || bulkSaving ? 'Saving…' : edit ? 'Save changes' : 'Add mappings'}
+						</button>
+					</div>
+				</Modal>
+			)}
+		</Card>
+	);
+}
+
 const SETTINGS_TABS = [
 	{ key: 'catalog', label: 'Catalog' },
 	{ key: 'organization', label: 'Suppliers & Projects' },
 	{ key: 'documents', label: 'Documents' },
+	{ key: 'approvals', label: 'Approvals' },
 	{ key: 'users', label: 'Users & Roles' },
 ] as const;
 type SettingsTab = (typeof SETTINGS_TABS)[number]['key'];
@@ -1208,7 +1505,13 @@ export function Settings() {
 
 	const capsRes = useFrappeGetCall<{ message: Capabilities }>(API.capabilities, undefined, 'pf:caps');
 	const canManageUsers = !!capsRes.data?.message?.manage_users;
-	const tabs = SETTINGS_TABS.filter((t) => t.key !== 'users' || canManageUsers);
+	// The Approvals tab only shows when the project-wise approval app is installed
+	// and this user may manage its routing.
+	const apprCtxRes = useFrappeGetCall<{ message: ApprovalRoutingContext }>(API.approvalRoutingContext, undefined, 'pf:appr-ctx');
+	const showApprovals = !!(apprCtxRes.data?.message?.available && apprCtxRes.data?.message?.can_manage);
+	const tabs = SETTINGS_TABS.filter(
+		(t) => (t.key !== 'users' || canManageUsers) && (t.key !== 'approvals' || showApprovals),
+	);
 
 	const [sp, setSp] = useSearchParams();
 	const urlTab = sp.get('tab') as SettingsTab | null;
@@ -1260,6 +1563,7 @@ export function Settings() {
 						<ReceiptTolerancePanel />
 					</>
 				)}
+				{activeTab === 'approvals' && showApprovals && <ApprovalRoutingPanel />}
 				{activeTab === 'users' && canManageUsers && <UsersPanel />}
 			</div>
 
