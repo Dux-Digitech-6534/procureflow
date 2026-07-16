@@ -56,7 +56,9 @@ export function PaymentDetail() {
 								rows={[
 									{ k: 'Supplier', v: d.supplier },
 									{ k: 'Project', v: d.project ?? '—' },
-									{ k: 'Against receipt', v: <span className="id">{d.purchase_receipt}</span> },
+									d.is_advance
+										? { k: 'Advance against PO', v: <span className="id">{d.purchase_order}</span> }
+										: { k: 'Against receipt', v: <span className="id">{d.purchase_receipt}</span> },
 									{ k: 'Payment date', v: fmtDateLong(d.payment_date), data: true },
 									{ k: 'Amount paid', v: fmtMoney(d.amount, 'INR'), data: true },
 									{ k: 'Previously paid', v: fmtMoney(d.previous_paid_amount, 'INR'), data: true },

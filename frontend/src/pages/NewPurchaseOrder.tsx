@@ -17,6 +17,7 @@ import { Icon } from '../components/Icon';
 import { DocLifecycleActions } from '../components/DocLifecycleActions';
 import { LinkedDocs } from '../components/LinkedDocs';
 import { DocActivity } from '../components/DocActivity';
+import { AdvancePaymentModal } from '../components/AdvancePaymentModal';
 import { Attachment } from '../components/Attachment';
 import { CreateSupplierModal } from '../components/CreateSupplierModal';
 import { CreateItemModal } from '../components/CreateItemModal';
@@ -71,6 +72,7 @@ export function NewPurchaseOrder() {
 	const ctxRes = useFrappeGetCall<{ message: PoContext }>(API.poContext, {});
 	const ctx = ctxRes.data?.message;
 	const [supModal, setSupModal] = useState(false);
+	const [advModal, setAdvModal] = useState(false);
 	const [itemModal, setItemModal] = useState(false);
 	const [pendingAdd, setPendingAdd] = useState<string | null>(null);
 	const mrsRes = useFrappeGetCall<{ message: ApprovedMr[] }>(API.approvedMrs, {});
@@ -242,7 +244,13 @@ export function NewPurchaseOrder() {
 	}
 
 	async function appendItems(rows: { item_code: string; item_name: string; uom: string; uoms?: { uom: string; conversion_factor: number }[]; sub_category: string | null; category?: string | null; qty?: number; specification?: string | null; remark?: string | null; material_request?: string | null; material_request_item?: string | null }[]) {
-		const fresh = rows.filter((r) => !lines.some((l) => l.item_code === r.item_code));
+		// The same item may repeat on several lines (same material, different
+		// specification) — hand-added rows always append. MR pulls stay idempotent
+		// per request LINE: a material_request_item already on the order is never
+		// pulled twice, but the same item from two different requests both land.
+		const fresh = rows.filter(
+			(r) => !r.material_request_item || !lines.some((l) => l.material_request_item === r.material_request_item),
+		);
 		const built: Line[] = fresh.map((r) => ({
 			item_code: r.item_code,
 			item_name: r.item_name,
@@ -266,9 +274,10 @@ export function NewPurchaseOrder() {
 			try {
 				const g = (await fetchGst({ item_code: b.item_code, company: ctx?.company }))?.message;
 				if (g) {
+					// Fill only lines still missing a GST — never overwrite a user-edited one.
 					setLines((ls) =>
 						ls.map((l) =>
-							l.item_code === b.item_code
+							l.item_code === b.item_code && !l.gst
 								? { ...l, gst: String(g), rwt: l.rate ? String(round(num(l.rate) * (1 + g / 100), 2)) : l.rwt }
 								: l,
 						),
@@ -283,6 +292,8 @@ export function NewPurchaseOrder() {
 	function addByCategory(code: string) {
 		const opt = (itemsRes.data?.message ?? []).find((o) => o.value === code);
 		if (!opt) return;
+		if (lines.some((l) => l.item_code === code))
+			toast.success('Same item added again — use the specification to tell the lines apart.');
 		void appendItems([{ item_code: opt.value, item_name: opt.label, uom: opt.uom, uoms: opt.uoms, sub_category: opt.sub_category, category }]);
 	}
 
@@ -327,7 +338,11 @@ export function NewPurchaseOrder() {
 				if (field === 'rate' || field === 'gst') {
 					n.rwt = n.rate ? String(round(num(n.rate) * (1 + g / 100), 2)) : '';
 				} else if (field === 'rwt') {
-					n.rate = g ? String(round(num(n.rwt) / (1 + g / 100), 4)) : n.rwt;
+					// Derive the without-tax rate at 6dp (matches the PO Item rate
+					// precision on the server). At 2dp a tax-inclusive quoted rate
+					// like 65 -> 55.08 makes qty*rate drift from the quoted total
+					// on large quantities; 6dp keeps qty*rate*(1+gst) exact.
+					n.rate = g ? String(round(num(n.rwt) / (1 + g / 100), 6)) : n.rwt;
 				}
 				return n;
 			}),
@@ -589,6 +604,23 @@ export function NewPurchaseOrder() {
 							<Icon name={overThreshold ? 'send' : 'check'} size={15} />
 							{saving ? 'Saving…' : overThreshold ? 'Send for approval' : 'Place order'}
 						</button>
+						{/* A saved Draft can be deleted outright (no cancel step). Render
+						    just the Delete control (its own confirm) alongside the save
+						    buttons — transitions/cancel/amend stay off so no workflow
+						    buttons duplicate the primary action above. */}
+						{isEdit && detail?.can_delete && (
+							<DocLifecycleActions
+								doctype="Purchase Order"
+								name={detail.name}
+								noun="order"
+								transitions={[]}
+								canCancel={false}
+								canAmend={false}
+								canDelete
+								onChanged={() => void detailRes.mutate()}
+								basePath="/purchase-orders"
+							/>
+						)}
 					</>
 				)}
 				{isEdit && detail && !editable && (
@@ -821,7 +853,7 @@ export function NewPurchaseOrder() {
 						</div>
 					)}
 					{lines.map((l, i) => (
-						<div className="poline" key={l.item_code}>
+						<div className="poline" key={i}>
 							<div className="potop">
 								<span className="ix">{i + 1}</span>
 								<div className="iname">
@@ -941,6 +973,38 @@ export function NewPurchaseOrder() {
 					</div>
 				</section>
 
+					{isEdit && detail && (detail.advance_paid > 0 || detail.can_pay_advance) && (
+						<section className="poside">
+							<div className="chead">
+								<Icon name="banknote" size={16} />
+								<span className="ttl">Advance</span>
+							</div>
+							<div className="taxsum">
+								<div className="taxrow">
+									<span className="k">Advance paid</span>
+									<span className="v">{fmtMoney(detail.advance_paid, 'INR')}</span>
+								</div>
+								{detail.advance_paid > 0 && (
+									<>
+										<div className="taxrow">
+											<span className="k">Applied to receipts</span>
+											<span className="v">{fmtMoney(detail.advance_applied, 'INR')}</span>
+										</div>
+										<div className="taxrow">
+											<span className="k">Unapplied credit</span>
+											<span className="v">{fmtMoney(detail.advance_unapplied, 'INR')}</span>
+										</div>
+									</>
+								)}
+							</div>
+							{detail.can_pay_advance && (
+								<button className="btn" style={{ margin: '10px 14px 14px', width: 'calc(100% - 28px)' }} onClick={() => setAdvModal(true)}>
+									<Icon name="banknote" size={14} /> Pay advance
+								</button>
+							)}
+						</section>
+					)}
+
 					{isEdit && detail && <LinkedDocs doctype="Purchase Order" name={detail.name} />}
 					{isEdit && detail && <DocActivity doctype="Purchase Order" name={detail.name} />}
 				</div>
@@ -956,6 +1020,13 @@ export function NewPurchaseOrder() {
 					category={category}
 					onClose={() => setItemModal(false)}
 					onCreated={async (code) => { setItemModal(false); await itemsRes.mutate(); setPendingAdd(code); }}
+				/>
+			)}
+			{advModal && detail && (
+				<AdvancePaymentModal
+					po={detail.name}
+					onClose={() => setAdvModal(false)}
+					onSaved={() => { setAdvModal(false); void detailRes.mutate(); }}
 				/>
 			)}
 		</main>

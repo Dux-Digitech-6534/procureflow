@@ -335,3 +335,53 @@ def _apply_gst_taxes(doc):
 def _recalculate(doc):
     if hasattr(doc, "calculate_taxes_and_totals"):
         doc.calculate_taxes_and_totals()
+
+
+# ---------------------------------------------------------------------------
+# Purchase Receipt validate hook — taxes must MIRROR the source Purchase Order
+# ---------------------------------------------------------------------------
+
+def purchase_receipt_validate(doc, method=None):
+    """A receipt's GST must mirror its source PO — never re-derived from masters.
+
+    When a Purchase Receipt is mapped from a PO, ERPNext re-attaches each item's
+    Item Tax Template from the Item master and (with the "Add taxes from item
+    tax template" Accounts Setting) auto-appends those tax rows whenever the
+    mapped taxes table is empty. A no-GST PO therefore produced a receipt WITH
+    GST (client-reported: PO ₹1,000 -> PR ₹1,050). Strip the re-attached
+    templates and any tax-account rows that don't come from the PO's own taxes
+    table, then recalculate so the receipt's grand total follows the PO's tax
+    treatment exactly (PO rows are charge_type "On Net Total", so partial
+    receipts still scale correctly).
+    """
+    if doc.doctype != "Purchase Receipt":
+        return
+
+    source_pos = {i.purchase_order for i in doc.get("items", []) if i.get("purchase_order")}
+    if not source_pos:
+        return  # standalone receipt (not made from a PO) — leave desk behaviour alone
+
+    for item in doc.get("items", []):
+        if item.get("item_tax_template"):
+            item.item_tax_template = None
+        if item.get("item_tax_rate") and item.item_tax_rate not in ("{}", ""):
+            item.item_tax_rate = "{}"
+
+    allowed = set()
+    for po in source_pos:
+        allowed.update(
+            frappe.get_all(
+                "Purchase Taxes and Charges",
+                filters={"parenttype": "Purchase Order", "parent": po},
+                pluck="account_head",
+            )
+        )
+
+    kept = [
+        t for t in doc.get("taxes", [])
+        if not _is_tax_account(t.account_head) or t.account_head in allowed
+    ]
+    if len(kept) != len(doc.get("taxes", [])):
+        doc.set("taxes", kept)
+
+    _recalculate(doc)

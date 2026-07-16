@@ -281,12 +281,8 @@ body,
     width: 4%;
 }
 
-.po-items-table col.po-col-code {
-    width: 11%;
-}
-
 .po-items-table col.po-col-desc {
-    width: 20%;
+    width: 31%;
 }
 
 .po-items-table col.po-col-uom {
@@ -824,7 +820,6 @@ body,
     <table class="po-items-table">
         <colgroup>
             <col class="po-col-sl">
-            <col class="po-col-code">
             <col class="po-col-desc">
             <col class="po-col-uom">
             <col class="po-col-qty">
@@ -838,8 +833,7 @@ body,
         <thead>
             <tr>
                 <th>Sr<br>No</th>
-                <th>Item</th>
-                <th>Item Description</th>
+                <th>Item &amp; Specification</th>
                 <th>Unit</th>
                 <th>Quantity</th>
                 <th>Rate<br>({{ currency }})</th>
@@ -883,18 +877,14 @@ body,
                         {{ loop.index }}
                     </td>
 
-                    <td class="po-text-center po-wrap">
-                        {{ item.get("item_code") or "" }}
-                    </td>
-
                     <td class="po-wrap">
                         <div class="po-item-title">
                             {{ item.get("item_name") or item.get("item_code") }}
                         </div>
 
-                        {% if item.get("description") and item.get("description") != item.get("item_name") %}
+                        {% if item.get("custom_specification") %}
                             <div class="po-item-description">
-                                {{ item.get("description") | safe }}
+                                {{ item.get("custom_specification") }}
                             </div>
                         {% endif %}
                     </td>

@@ -134,9 +134,13 @@ export function NewMaterialRequest() {
 		setLines([]);
 	}
 	function addItem(itemCode: string) {
-		if (!itemCode || lines.some((l) => l.item_code === itemCode)) return;
+		if (!itemCode) return;
 		const opt = itemOptions.find((o) => o.value === itemCode);
 		if (!opt) return;
+		// The same item may sit on several lines (same material, different
+		// specification/brand) — nudge the user to tell the lines apart.
+		if (lines.some((l) => l.item_code === itemCode))
+			toast.success('Same item added again — use the specification to tell the lines apart.');
 		setLines((ls) => [
 			...ls,
 			{
@@ -489,7 +493,7 @@ export function NewMaterialRequest() {
 							</div>
 						)}
 						{lines.map((l, i) => (
-							<div className="mrline" key={l.item_code}>
+							<div className="mrline" key={i}>
 								<div className="mrtop">
 									<span className="ix">{i + 1}</span>
 									<div className="iname">

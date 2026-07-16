@@ -106,6 +106,7 @@ export function ReceiptDetail() {
 									{ k: 'Receipt date', v: fmtDateLong(d.posting_date), data: true },
 									{ k: 'Grand total', v: fmtMoney(d.total || d.grand_total, 'INR'), data: true },
 									{ k: 'Paid', v: fmtMoney(d.paid, 'INR'), data: true },
+									...(d.advance_applied > 0 ? [{ k: 'of which PO advance', v: fmtMoney(d.advance_applied, 'INR'), data: true }] : []),
 									{ k: 'Outstanding', v: fmtMoney(d.outstanding, 'INR'), data: true },
 								]}
 							/>

@@ -6,6 +6,7 @@ import { useToast } from '../components/Toast';
 import { fmtDateLong, fmtMoney, parseServerError } from '../lib/format';
 import { whatsAppPoUrl } from '../lib/whatsapp';
 import { RelatedDocs } from './RelatedDocs';
+import { AdvancePaymentModal } from '../components/AdvancePaymentModal';
 import { useCaps } from './caps';
 import { useLang, tStatus } from './i18n';
 
@@ -38,6 +39,7 @@ export function PoDetailSheet({
 	const [confirmDel, setConfirmDel] = useState(false);
 	const { call: cancelDoc, loading: cancelling } = useFrappePostCall(API.cancelDoc);
 	const [confirmCancel, setConfirmCancel] = useState(false);
+	const [advModal, setAdvModal] = useState(false);
 
 	async function doDelete() {
 		setErr('');
@@ -177,6 +179,34 @@ export function PoDetailSheet({
 								<span className="v">{fmtMoney(total, 'INR')}</span>
 							</div>
 
+							{/* Advance credit against this PO (auto-applied to receipts). */}
+							{(d.advance_paid > 0 || d.can_pay_advance) && (
+								<>
+									<div className="eyebrow2">{t('d.advance')}</div>
+									<div className="fct">
+										<span className="k">{t('d.advancePaid')}</span>
+										<span className="v">{fmtMoney(d.advance_paid, 'INR')}</span>
+									</div>
+									{d.advance_paid > 0 && (
+										<>
+											<div className="fct">
+												<span className="k">{t('d.advanceApplied')}</span>
+												<span className="v">{fmtMoney(d.advance_applied, 'INR')}</span>
+											</div>
+											<div className="fct">
+												<span className="k">{t('d.advanceUnapplied')}</span>
+												<span className="v">{fmtMoney(d.advance_unapplied, 'INR')}</span>
+											</div>
+										</>
+									)}
+									{d.can_pay_advance && (
+										<button className="mbtn sec" style={{ marginTop: 12, justifyContent: 'center', width: '100%' }} onClick={() => setAdvModal(true)}>
+											<Icon name="banknote" size={17} /> {t('d.payAdvance')}
+										</button>
+									)}
+								</>
+							)}
+
 							{/* Sending the PO to the supplier is a Purchase-Officer action —
 							    viewers (e.g. the assigned receiver) don't get the button. */}
 							{d.docstatus === 1 && caps.create_po && (
@@ -192,6 +222,14 @@ export function PoDetailSheet({
 							)}
 
 							<RelatedDocs doctype="Purchase Order" name={name} />
+
+							{advModal && d && (
+								<AdvancePaymentModal
+									po={name}
+									onClose={() => setAdvModal(false)}
+									onSaved={() => { setAdvModal(false); void detailRes.mutate(); }}
+								/>
+							)}
 
 							{/* A SUBMITTED order can be cancelled (permission-checked). */}
 							{d.can_cancel && (

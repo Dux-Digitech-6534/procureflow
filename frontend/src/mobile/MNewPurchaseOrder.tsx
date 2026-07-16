@@ -131,9 +131,12 @@ export function MNewPurchaseOrder() {
 	}
 
 	async function addItem(code: string) {
-		if (!code || lines.some((l) => l.item_code === code && !l.material_request)) return;
+		if (!code) return;
 		const o = itemOptions.find((x) => x.value === code);
 		if (!o) return;
+		// The same item may sit on several lines (same material, different
+		// specification/brand) — nudge the user to tell the lines apart.
+		if (lines.some((l) => l.item_code === code)) toast.success(t('npo.dupItem'));
 		setLines((ls) => [
 			...ls,
 			{
@@ -153,7 +156,8 @@ export function MNewPurchaseOrder() {
 		// Prefill the item's default GST (best-effort).
 		try {
 			const g = (await fetchGst({ item_code: code })).message;
-			if (g != null) setLines((ls) => ls.map((l) => (l.item_code === code && !l.material_request ? { ...l, gst: String(g) } : l)));
+			// Fill only lines still missing a GST — never overwrite a user-edited one.
+			if (g != null) setLines((ls) => ls.map((l) => (l.item_code === code && !l.material_request && !l.gst ? { ...l, gst: String(g) } : l)));
 		} catch {
 			/* GST is user-editable — ignore a prefill failure */
 		}

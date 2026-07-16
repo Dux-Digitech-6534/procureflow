@@ -591,9 +591,32 @@ function StorePanel({ canCreate }: { canCreate: boolean }) {
 
 /* --------------------------------- Suppliers -------------------------------- */
 
+interface SupplierAddress {
+	address_line1?: string | null; address_line2?: string | null; city?: string | null;
+	state?: string | null; pincode?: string | null; country?: string | null; phone?: string | null;
+}
+interface SupplierDetailMsg {
+	name: string; supplier_name: string; supplier_group: string | null; supplier_type: string | null;
+	tax_id: string | null; email_id: string | null; mobile_no: string | null; address: SupplierAddress | null;
+}
+interface SupplierForm {
+	supplier_name: string; supplier_group: string; supplier_type: string; tax_id: string;
+	email_id: string; mobile_no: string;
+	address_line1: string; address_line2: string; city: string; state: string; pincode: string; country: string; phone: string;
+}
+const BLANK_SUPPLIER: SupplierForm = {
+	supplier_name: '', supplier_group: '', supplier_type: 'Company', tax_id: '', email_id: '', mobile_no: '',
+	address_line1: '', address_line2: '', city: '', state: '', pincode: '', country: 'India', phone: '',
+};
+const SUPPLIER_TYPES = [
+	{ value: 'Company', label: 'Company' },
+	{ value: 'Individual', label: 'Individual' },
+	{ value: 'Partnership', label: 'Partnership' },
+];
+
 function SupplierPanel({ canCreate }: { canCreate: boolean }) {
 	const { data, mutate } = useFrappeGetDocList<Row>('Supplier', {
-		fields: ['name', 'supplier_name', 'supplier_group'],
+		fields: ['name', 'supplier_name', 'supplier_group', 'supplier_type'],
 		orderBy: { field: 'modified', order: 'desc' },
 		limit: 0,
 	});
@@ -603,27 +626,58 @@ function SupplierPanel({ canCreate }: { canCreate: boolean }) {
 		orderBy: { field: 'name', order: 'asc' },
 		limit: 0,
 	});
-	const { commit, loading } = useMasterSave('Supplier');
+	const { call: saveCall, loading } = useFrappePostCall<{ message: { name: string } }>(API.saveSupplier);
+	const { call: detailCall } = useFrappePostCall<{ message: SupplierDetailMsg }>(API.supplierDetail);
 	const toast = useToast();
 	const [modal, setModal] = useState(false);
 	const [edit, setEdit] = useState<Row | null>(null);
-	const [name, setName] = useState('');
-	const [group, setGroup] = useState('');
+	const [f, setF] = useState<SupplierForm>(BLANK_SUPPLIER);
+	const [loadingEdit, setLoadingEdit] = useState(false);
 	const [err, setErr] = useState('');
 	const [q, setQ] = useState('');
 	const bulk = useSel();
 	const rows = data ?? [];
-	const shown = useMemo(() => filterRows(rows, q, ['supplier_name', 'supplier_group', 'name']), [rows, q]);
+	const shown = useMemo(() => filterRows(rows, q, ['supplier_name', 'supplier_group', 'supplier_type', 'name']), [rows, q]);
 
-	function openNew() { setErr(''); setEdit(null); setName(''); setGroup(''); setModal(true); }
-	function openEdit(r: Row) { if (!canCreate) return; setErr(''); setEdit(r); setName(String(r.supplier_name ?? r.name)); setGroup(String(r.supplier_group ?? '')); setModal(true); }
+	function set<K extends keyof SupplierForm>(k: K, v: SupplierForm[K]) { setF((s) => ({ ...s, [k]: v })); }
+
+	function openNew() { setErr(''); setEdit(null); setF(BLANK_SUPPLIER); setModal(true); }
+	async function openEdit(r: Row) {
+		if (!canCreate) return;
+		setErr(''); setEdit(r);
+		setF({ ...BLANK_SUPPLIER, supplier_name: String(r.supplier_name ?? r.name), supplier_group: String(r.supplier_group ?? '') });
+		setModal(true);
+		setLoadingEdit(true);
+		try {
+			const d = (await detailCall({ name: r.name })).message;
+			setF({
+				supplier_name: d.supplier_name ?? '', supplier_group: d.supplier_group ?? '',
+				supplier_type: d.supplier_type ?? 'Company', tax_id: d.tax_id ?? '',
+				email_id: d.email_id ?? '', mobile_no: d.mobile_no ?? '',
+				address_line1: d.address?.address_line1 ?? '', address_line2: d.address?.address_line2 ?? '',
+				city: d.address?.city ?? '', state: d.address?.state ?? '', pincode: d.address?.pincode ?? '',
+				country: d.address?.country ?? 'India', phone: d.address?.phone ?? '',
+			});
+		} catch (e) { setErr(parseServerError(e)); }
+		finally { setLoadingEdit(false); }
+	}
 	function close() { setModal(false); setEdit(null); }
 
 	async function save() {
-		if (!name.trim()) return setErr('Supplier name is required.');
+		if (!f.supplier_name.trim()) return setErr('Supplier name is required.');
+		if ((f.address_line1 || f.pincode || f.state) && !f.city.trim()) return setErr('City is required when an address is entered.');
 		setErr('');
 		try {
-			await commit(edit, 'supplier_name', name, { supplier_group: group || null }, true);
+			await saveCall({ data: {
+				name: edit?.name ?? null,
+				supplier_name: f.supplier_name, supplier_group: f.supplier_group || null,
+				supplier_type: f.supplier_type, tax_id: f.tax_id,
+				email_id: f.email_id, mobile_no: f.mobile_no,
+				address: {
+					address_line1: f.address_line1, address_line2: f.address_line2, city: f.city,
+					state: f.state, pincode: f.pincode, country: f.country, phone: f.phone,
+				},
+			} });
 			toast.success(edit ? 'Supplier updated' : 'Supplier created');
 			close();
 			mutate();
@@ -646,12 +700,13 @@ function SupplierPanel({ canCreate }: { canCreate: boolean }) {
 					) : (
 						<div className="tablescroll">
 							<table className={canCreate ? 'clickable' : undefined}>
-								<thead><tr>{canCreate && <th style={{ width: 34 }} />}<th>Supplier</th><th>Group</th></tr></thead>
+								<thead><tr>{canCreate && <th style={{ width: 34 }} />}<th>Supplier</th><th>Type</th><th>Group</th></tr></thead>
 								<tbody>
 									{shown.map((r) => (
-										<tr key={r.name} onClick={canCreate ? () => openEdit(r) : undefined}>
+										<tr key={r.name} onClick={canCreate ? () => void openEdit(r) : undefined}>
 											{canCreate && <SelCell name={r.name} sel={bulk.sel} toggle={bulk.toggle} />}
 											<td className="c1">{String(r.supplier_name ?? r.name)}</td>
+											<td className="dim">{String(r.supplier_type ?? '—')}</td>
 											<td className="dim">{String(r.supplier_group ?? '—')}</td>
 										</tr>
 									))}
@@ -666,21 +721,60 @@ function SupplierPanel({ canCreate }: { canCreate: boolean }) {
 					<div className="formgrid">
 						<div className="span2">
 							<Field label="Supplier name" required>
-								<TextInput value={name} onChange={setName} placeholder="e.g. Ajmera Hardware" />
+								<TextInput value={f.supplier_name} onChange={(v) => set('supplier_name', v)} placeholder="e.g. Ajmera Hardware" />
+							</Field>
+						</div>
+						<Field label="Supplier type">
+							<SelectInput value={f.supplier_type} onChange={(v) => set('supplier_type', v)} options={SUPPLIER_TYPES} />
+						</Field>
+						<Field label="Supplier group">
+							<SearchSelect value={f.supplier_group} onChange={(v) => set('supplier_group', v)} options={opts(groups.data)} placeholder="Select group…" />
+						</Field>
+						<Field label="Tax ID / GSTIN">
+							<TextInput value={f.tax_id} onChange={(v) => set('tax_id', v)} placeholder="e.g. 23AAZCA3598D1ZA" />
+						</Field>
+						<Field label="Email">
+							<TextInput value={f.email_id} onChange={(v) => set('email_id', v)} placeholder="supplier@example.com" />
+						</Field>
+						<Field label="Mobile no">
+							<TextInput value={f.mobile_no} onChange={(v) => set('mobile_no', v)} placeholder="10-digit mobile" />
+						</Field>
+						<div className="span2" style={{ margin: '4px 0 -2px', fontSize: 12, fontWeight: 600, color: 'var(--fg-2)' }}>
+							Address <span style={{ fontWeight: 400 }}>(optional — creates a linked address)</span>
+						</div>
+						<div className="span2">
+							<Field label="Address line 1">
+								<TextInput value={f.address_line1} onChange={(v) => set('address_line1', v)} placeholder="Building / street" />
 							</Field>
 						</div>
 						<div className="span2">
-							<Field label="Supplier group">
-								<SearchSelect value={group} onChange={setGroup} options={opts(groups.data)} placeholder="Select group…" />
+							<Field label="Address line 2">
+								<TextInput value={f.address_line2} onChange={(v) => set('address_line2', v)} placeholder="Area / landmark" />
 							</Field>
 						</div>
+						<Field label="City">
+							<TextInput value={f.city} onChange={(v) => set('city', v)} placeholder="e.g. Indore" />
+						</Field>
+						<Field label="State">
+							<TextInput value={f.state} onChange={(v) => set('state', v)} placeholder="e.g. Madhya Pradesh" />
+						</Field>
+						<Field label="Pincode">
+							<TextInput value={f.pincode} onChange={(v) => set('pincode', v)} placeholder="452001" />
+						</Field>
+						<Field label="Country">
+							<TextInput value={f.country} onChange={(v) => set('country', v)} placeholder="India" />
+						</Field>
+						<Field label="Address phone">
+							<TextInput value={f.phone} onChange={(v) => set('phone', v)} placeholder="Landline / phone" />
+						</Field>
 					</div>
 					<div className="formfoot">
+						{loadingEdit && <span className="dim" style={{ fontSize: 12 }}>Loading details…</span>}
 						{err && <span className="ferr">{err}</span>}
 						{edit && <DeleteMasterButton doctype="Supplier" name={edit.name} onDeleted={() => { close(); mutate(); }} />}
 						<span className="spacer" />
 						<button className="btn" onClick={close}>Cancel</button>
-						<button className="btn primary" disabled={loading} onClick={() => void save()}>
+						<button className="btn primary" disabled={loading || loadingEdit} onClick={() => void save()}>
 							{loading ? 'Saving…' : edit ? 'Save changes' : 'Create supplier'}
 						</button>
 					</div>
@@ -1055,6 +1149,66 @@ function ReceiptTolerancePanel() {
 						<span className="spacer" />
 						<button className="btn primary" disabled={loading} onClick={() => void save()}>
 							{loading ? 'Saving…' : 'Save tolerance'}
+						</button>
+					</div>
+				)}
+			</div>
+		</Card>
+	);
+}
+
+function AdvanceCapPanel() {
+	const { data, mutate } = useFrappeGetCall<{ message: Tolerance }>(API.getAdvanceSettings, {});
+	const { call: saveCall, loading } = useFrappePostCall<{ message: { enabled: boolean; pct: number } }>(API.saveAdvanceSettings);
+	const toast = useToast();
+	const canEdit = data?.message?.can_edit ?? false;
+	const [enabled, setEnabled] = useState(true);
+	const [pct, setPct] = useState('100');
+	const [seeded, setSeeded] = useState(false);
+	const [err, setErr] = useState('');
+
+	useEffect(() => {
+		if (data?.message && !seeded) {
+			setEnabled(!!data.message.enabled);
+			setPct(String(data.message.pct ?? 100));
+			setSeeded(true);
+		}
+	}, [data, seeded]);
+
+	async function save() {
+		setErr('');
+		try {
+			const r = await saveCall({ enabled, pct: Number(pct) || 0 });
+			setEnabled(!!r.message.enabled);
+			setPct(String(r.message.pct ?? 100));
+			toast.success('Advance limit saved');
+			mutate();
+		} catch (e) {
+			setErr(parseServerError(e));
+		}
+	}
+
+	return (
+		<Card>
+			<CHead icon="banknote" title="Advance limit" action={canEdit ? undefined : <span className="dim" style={{ fontSize: 11.5 }}>read-only</span>} />
+			<div style={{ padding: '2px 2px 4px' }}>
+				<div className="sub" style={{ margin: '0 0 12px' }}>
+					The most that can be paid in advance against a Purchase Order, as a % of the PO value. Default 100%. Raise it above 100% to allow paying more than the PO value, or turn the cap off for no limit.
+				</div>
+				<div className="formgrid">
+					<Field label="Cap advance">
+						<SelectInput value={enabled ? '1' : '0'} onChange={(v) => setEnabled(v === '1')} disabled={!canEdit} options={[{ value: '0', label: 'No limit' }, { value: '1', label: 'On' }]} />
+					</Field>
+					<Field label="Max advance %" hint="% of the PO value (100 = up to the full PO)">
+						<TextInput value={pct} onChange={setPct} disabled={!canEdit || !enabled} placeholder="100" />
+					</Field>
+				</div>
+				{canEdit && (
+					<div className="formfoot" style={{ marginTop: 12 }}>
+						{err && <span className="ferr">{err}</span>}
+						<span className="spacer" />
+						<button className="btn primary" disabled={loading} onClick={() => void save()}>
+							{loading ? 'Saving…' : 'Save advance limit'}
 						</button>
 					</div>
 				)}
@@ -1561,6 +1715,7 @@ export function Settings() {
 					<>
 						<PoTermsPanel />
 						<ReceiptTolerancePanel />
+						<AdvanceCapPanel />
 					</>
 				)}
 				{activeTab === 'approvals' && showApprovals && <ApprovalRoutingPanel />}

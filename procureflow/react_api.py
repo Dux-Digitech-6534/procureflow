@@ -120,8 +120,17 @@ def _doc_action_state(doc):
     can_amend = bool(
         doc.docstatus == 2 and not already_amended and frappe.has_permission(doc.doctype, "amend", doc)
     )
-    # A cancelled doc (docstatus 2) can be permanently deleted (with delete perm).
-    can_delete = bool(doc.docstatus == 2 and frappe.has_permission(doc.doctype, "delete", doc))
+    # A cancelled doc (docstatus 2) can be permanently deleted. A Purchase Order
+    # still in Draft or Rejected (docstatus 0 — never submitted, so nothing to
+    # cancel) can be deleted outright too. Both are permission-checked.
+    deletable_draft_po = bool(
+        doc.docstatus == 0
+        and doc.doctype == "Purchase Order"
+        and doc.get("workflow_state") in ("Draft", "Rejected")
+    )
+    can_delete = bool(
+        (doc.docstatus == 2 or deletable_draft_po) and frappe.has_permission(doc.doctype, "delete", doc)
+    )
     return {"transitions": transitions, "can_cancel": can_cancel, "can_amend": can_amend, "can_delete": can_delete}
 
 
@@ -582,6 +591,33 @@ def save_tolerance(enabled, pct):
     doc.save(ignore_permissions=True)
     frappe.db.commit()
     return {"enabled": bool(doc.enable_global_tolerance), "pct": flt(doc.global_tolerance_percentage)}
+
+
+@frappe.whitelist()
+def get_advance_settings():
+    """Max-advance-vs-PO-value setting for the Settings panel. Default: capped at
+    100%. Raise the % (or turn the cap off) to allow paying more than the PO value."""
+    from procureflow.advance import get_advance_cap_settings
+
+    s = get_advance_cap_settings()
+    return {"enabled": s["enabled"], "pct": s["pct"], "can_edit": _can_manage_settings()}
+
+
+@frappe.whitelist()
+def save_advance_settings(enabled, pct):
+    """Set the advance cap (percentage of PO value). System Manager or Settings
+    Manager only. No upper bound — a value above 100 permits over-advancing."""
+    from procureflow.advance import get_advance_cap_settings, set_advance_cap_settings
+
+    if not _can_manage_settings():
+        frappe.throw(_("Only a System Manager or Settings Manager can change the advance limit."), frappe.PermissionError)
+    p = flt(pct)
+    if p < 0:
+        frappe.throw(_("Advance limit cannot be negative."))
+    set_advance_cap_settings(enabled, p)
+    frappe.db.commit()
+    s = get_advance_cap_settings()
+    return {"enabled": s["enabled"], "pct": s["pct"]}
 
 
 # ===========================================================================
@@ -1100,6 +1136,15 @@ def save_purchase_order(data):
         if not row.get("item_code"):
             continue
         item = frappe.get_cached_doc("Item", row["item_code"])
+        # Derive rate from the tax-inclusive rate HERE if only that was sent —
+        # an empty rate would otherwise be filled from the Item Price List by
+        # ERPNext's get_item_details before purchase_tax._normalize_item_rates
+        # gets a chance to derive it, silently discarding the intended price.
+        rate = flt(row.get("rate"))
+        rate_with_tax = flt(row.get("rate_with_tax"))
+        gst_percent = flt(row.get("gst_percent"))
+        if not rate and rate_with_tax:
+            rate = rate_with_tax / (1 + gst_percent / 100.0) if gst_percent else rate_with_tax
         doc.append(
             "items",
             {
@@ -1110,7 +1155,7 @@ def save_purchase_order(data):
                 "uom": row.get("uom") or item.stock_uom,
                 "stock_uom": item.stock_uom,
                 "conversion_factor": _conversion_factor(item.name, row.get("uom") or item.stock_uom, item.stock_uom),
-                "rate": flt(row.get("rate")),
+                "rate": rate,
                 "custom_gst_percent": flt(row.get("gst_percent")),
                 "custom_rate_with_tax": flt(row.get("rate_with_tax")),
                 # Inherit the header Required-by so ERPNext's validate_schedule_date
@@ -1273,7 +1318,32 @@ def po_detail(name):
         "taxes": taxes,
         "items": items,
         "print_format": PO_PRINT_FORMAT,
+        **_po_advance_summary(doc),
         **_doc_action_state(doc),
+    }
+
+
+def _po_advance_summary(doc):
+    """Advance-payment picture for the PO detail: total advance paid, how much has
+    been auto-allocated to receipts, how much is still unapplied, and whether the
+    viewer may pay an advance. Access mirrors the `pay` capability exactly — admin
+    roles (incl. Purchase Manager) or Accounts User — once the PO is approved."""
+    from procureflow.advance import advance_cap_remaining, po_advance_allocation
+
+    try:
+        alloc = po_advance_allocation(doc.name)
+    except Exception:
+        alloc = {"advance_total": 0, "applied": 0, "unapplied": 0}
+    roles = set(frappe.get_roles())
+    can_pay_advance = bool(
+        doc.docstatus == 1 and (roles & _CAP_ADMIN_ROLES or roles & _CAP_PAY_ROLES)
+    )
+    return {
+        "advance_paid": alloc["advance_total"],
+        "advance_applied": alloc["applied"],
+        "advance_unapplied": alloc["unapplied"],
+        "advance_cap_remaining": advance_cap_remaining(doc.name),
+        "can_pay_advance": can_pay_advance,
     }
 
 
@@ -1329,14 +1399,20 @@ def _hide_amended_originals(doctype, rows):
 
 @frappe.whitelist()
 def delete_doc(doctype, name):
-    """Permanently delete a CANCELLED MR/PO/PR (docstatus 2). Respects frappe delete
-    perms. Only a cancelled doc may be deleted — a submitted one must be cancelled
-    first (matching ERPNext's own rule)."""
+    """Permanently delete a CANCELLED MR/PO/PR (docstatus 2), OR a Purchase Order
+    still in Draft/Rejected (docstatus 0 — never submitted, nothing to cancel).
+    Respects frappe delete perms. Any other submitted doc must be cancelled first
+    (matching ERPNext's own rule)."""
     if doctype not in ("Material Request", "Purchase Order", "Purchase Receipt"):
         frappe.throw(_("Unsupported document type."))
     doc = frappe.get_doc(doctype, name)
-    if doc.docstatus != 2:
-        frappe.throw(_("Only a cancelled document can be deleted. Cancel it first."))
+    is_draft_po = bool(
+        doctype == "Purchase Order"
+        and doc.docstatus == 0
+        and doc.get("workflow_state") in ("Draft", "Rejected")
+    )
+    if doc.docstatus != 2 and not is_draft_po:
+        frappe.throw(_("Only a cancelled document — or a Draft/Rejected Purchase Order — can be deleted. Cancel it first."))
     if not frappe.has_permission(doctype, "delete", doc):
         raise frappe.PermissionError(_("You are not permitted to delete this document."))
     frappe.delete_doc(doctype, name)
@@ -1425,10 +1501,22 @@ def _pr_pay_info(name):
         get_purchase_receipt_total,
         get_submitted_paid_amount,
     )
+    from procureflow.advance import po_advance_allocation
+    from procureflow.api import get_purchase_receipt_purchase_order
 
     total = flt(get_purchase_receipt_total(name))
-    paid = flt(get_submitted_paid_amount(name))
-    return {"total": total, "paid": paid, "outstanding": max(total - paid, 0)}
+    direct = flt(get_submitted_paid_amount(name))
+    # Advance auto-allocated from the source PO counts as payment on this receipt.
+    po = get_purchase_receipt_purchase_order(frappe.get_doc("Purchase Receipt", name))
+    advance = flt(po_advance_allocation(po)["per_pr"].get(name, 0.0)) if po else 0.0
+    paid = direct + advance
+    return {
+        "total": total,
+        "paid": paid,
+        "direct_paid": direct,
+        "advance_applied": advance,
+        "outstanding": max(total - paid, 0),
+    }
 
 
 @frappe.whitelist()
@@ -1621,6 +1709,8 @@ def pr_detail(name):
         "docstatus": doc.docstatus,
         "total": info["total"],
         "paid": info["paid"],
+        "direct_paid": info["direct_paid"],
+        "advance_applied": info["advance_applied"],
         "outstanding": info["outstanding"],
         "material_image": doc.get("custom_add_material"),
         "invoice_image": doc.get("custom_add_invoice"),
@@ -1645,24 +1735,68 @@ def save_payment(data):
     from procureflow.api import get_procureflow_payment_entry_defaults
 
     data = _loads(data)
+    po = data.get("purchase_order")
     pr = data.get("purchase_receipt")
-    if not pr:
-        frappe.throw(_("Select a purchase receipt."))
 
-    # Set supplier/project/company from the receipt so they match the payment
-    # entry's own validation (which requires them to equal the PR's values).
-    defaults = get_procureflow_payment_entry_defaults(pr)
     doc = frappe.new_doc("Procureflow Payment Entry")
-    doc.purchase_receipt = pr
-    doc.supplier = defaults.get("supplier")
-    doc.project = defaults.get("project")
-    doc.company = defaults.get("company")
+    if po and not pr:
+        # Advance against a Purchase Order (no receipt yet). Supplier/project/
+        # company are set from the PO to satisfy the entry's own validation.
+        po_doc = frappe.get_doc("Purchase Order", po)
+        doc.purchase_order = po
+        doc.supplier = po_doc.supplier
+        doc.project = po_doc.get("custom_project_name")
+        doc.company = po_doc.get("custom_test_company_") or frappe.db.get_value(
+            "Project Master", po_doc.get("custom_project_name"), "company_name"
+        )
+    elif pr:
+        # Set supplier/project/company from the receipt so they match the payment
+        # entry's own validation (which requires them to equal the PR's values).
+        defaults = get_procureflow_payment_entry_defaults(pr)
+        doc.purchase_receipt = pr
+        doc.supplier = defaults.get("supplier")
+        doc.project = defaults.get("project")
+        doc.company = defaults.get("company")
+    else:
+        frappe.throw(_("Select a purchase receipt (payment) or a purchase order (advance)."))
+
     doc.payment_date = data.get("payment_date") or nowdate()
     doc.amount = flt(data.get("amount"))
     doc.remark = data.get("remark")
     doc.insert()
-    doc.submit()  # stamps the PR payment status
+    doc.submit()  # advance -> re-allocates across the PO's receipts; payment -> stamps the PR
     return {"name": doc.name}
+
+
+@frappe.whitelist()
+def advance_payment_defaults(purchase_order):
+    """Defaults for the 'Pay advance' modal: party from the PO, PO value, advance
+    already paid, and how much more advance the cap setting still allows."""
+    from procureflow.advance import (
+        advance_cap_remaining,
+        get_advance_cap_settings,
+        get_po_advance_total,
+        get_po_grand_total,
+    )
+
+    po = frappe.get_doc("Purchase Order", purchase_order)
+    po.check_permission("read")
+    project = po.get("custom_project_name")
+    company = po.get("custom_test_company_") or frappe.db.get_value("Project Master", project, "company_name")
+    remaining = advance_cap_remaining(purchase_order)
+    return {
+        "purchase_order": po.name,
+        "supplier": po.supplier,
+        "supplier_name": po.supplier_name,
+        "project": project,
+        "company": company,
+        "po_total": get_po_grand_total(purchase_order),
+        "advance_paid": get_po_advance_total(purchase_order),
+        "cap": get_advance_cap_settings(),
+        "cap_remaining": remaining,  # None = uncapped
+        "amount": remaining if remaining is not None else 0,
+        "payment_date": nowdate(),
+    }
 
 
 @frappe.whitelist()
@@ -1670,7 +1804,7 @@ def payment_list(limit=100):
     return frappe.get_all(
         "Procureflow Payment Entry",
         filters={"docstatus": 1},
-        fields=["name", "purchase_receipt", "supplier", "project", "amount", "payment_date"],
+        fields=["name", "purchase_receipt", "purchase_order", "supplier", "project", "amount", "payment_date"],
         order_by="payment_date desc, modified desc",
         limit_page_length=int(limit),
     )
@@ -1866,6 +2000,144 @@ def save_item(data):
     return doc.name
 
 
+# ===========================================================================
+# Supplier create/edit with linked Contact (email/mobile) + Address — mirrors
+# the ERPNext model: Contact and Address are separate docs joined to the
+# Supplier via Dynamic Links; the Supplier keeps a primary contact/address link.
+# ===========================================================================
+
+def _first_linked(doctype, supplier):
+    """Name of the first Contact/Address linked to this supplier (Dynamic Link)."""
+    r = frappe.get_all(
+        "Dynamic Link",
+        filters={"link_doctype": "Supplier", "link_name": supplier, "parenttype": doctype},
+        fields=["parent"], order_by="creation asc", limit=1,
+    )
+    return r[0].parent if r else None
+
+
+@frappe.whitelist()
+def supplier_detail(name):
+    """A supplier plus its primary contact's email/mobile and primary address, so
+    the Settings edit form can prefill every field (not just name + group)."""
+    doc = frappe.get_doc("Supplier", name)
+    doc.check_permission("read")
+    out = {
+        "name": doc.name,
+        "supplier_name": doc.supplier_name,
+        "supplier_group": doc.get("supplier_group"),
+        "supplier_type": doc.get("supplier_type"),
+        "tax_id": doc.get("tax_id"),
+        "email_id": None,
+        "mobile_no": None,
+        "address": None,
+    }
+    contact = doc.get("supplier_primary_contact") or _first_linked("Contact", name)
+    if contact and frappe.db.exists("Contact", contact):
+        c = frappe.get_doc("Contact", contact)
+        out["email_id"] = c.get("email_id") or (c.email_ids[0].email_id if c.get("email_ids") else None)
+        out["mobile_no"] = c.get("mobile_no") or (c.phone_nos[0].phone if c.get("phone_nos") else None)
+    addr = doc.get("supplier_primary_address") or _first_linked("Address", name)
+    if addr and frappe.db.exists("Address", addr):
+        a = frappe.get_doc("Address", addr)
+        out["address"] = {
+            "address_line1": a.get("address_line1"), "address_line2": a.get("address_line2"),
+            "city": a.get("city"), "state": a.get("state"), "pincode": a.get("pincode"),
+            "country": a.get("country"), "phone": a.get("phone"),
+        }
+    return out
+
+
+def _upsert_supplier_contact(supplier, sname, email, mobile):
+    """Create/refresh the supplier's primary Contact from email + mobile, and point
+    the supplier's primary-contact link (+ its read-only email/mobile) at it."""
+    email = (email or "").strip()
+    mobile = (mobile or "").strip()
+    existing = frappe.db.get_value("Supplier", supplier, "supplier_primary_contact") or _first_linked("Contact", supplier)
+    if not email and not mobile:
+        return  # nothing to record — leave any existing contact untouched
+    if existing and frappe.db.exists("Contact", existing):
+        c = frappe.get_doc("Contact", existing)
+    else:
+        c = frappe.new_doc("Contact")
+        c.first_name = sname
+        c.append("links", {"link_doctype": "Supplier", "link_name": supplier})
+    c.set("email_ids", [])
+    if email:
+        c.append("email_ids", {"email_id": email, "is_primary": 1})
+    c.set("phone_nos", [])
+    if mobile:
+        c.append("phone_nos", {"phone": mobile, "is_primary_mobile_no": 1, "is_primary_phone": 1})
+    c.flags.ignore_permissions = True
+    c.save()
+    frappe.db.set_value("Supplier", supplier, {
+        "supplier_primary_contact": c.name,
+        "mobile_no": mobile or None,
+        "email_id": email or None,
+    })
+
+
+def _upsert_supplier_address(supplier, sname, addr):
+    """Create/refresh the supplier's primary Address and link it (Dynamic Link)."""
+    addr = addr or {}
+    meaningful = any(addr.get(k) for k in ("address_line1", "city", "pincode", "state"))
+    if not meaningful:
+        return  # no address entered — nothing to do
+    existing = frappe.db.get_value("Supplier", supplier, "supplier_primary_address") or _first_linked("Address", supplier)
+    if existing and frappe.db.exists("Address", existing):
+        a = frappe.get_doc("Address", existing)
+    else:
+        a = frappe.new_doc("Address")
+        a.address_type = "Billing"
+        a.address_title = sname
+        a.append("links", {"link_doctype": "Supplier", "link_name": supplier})
+    a.address_line1 = (addr.get("address_line1") or a.get("address_line1") or sname)
+    a.address_line2 = addr.get("address_line2")
+    a.city = addr.get("city")
+    a.state = addr.get("state")
+    a.pincode = addr.get("pincode")
+    a.country = addr.get("country") or a.get("country") or "India"
+    a.phone = addr.get("phone")
+    a.is_primary_address = 1
+    a.flags.ignore_permissions = True
+    a.save()
+    frappe.db.set_value("Supplier", supplier, "supplier_primary_address", a.name)
+
+
+@frappe.whitelist()
+def save_supplier(data):
+    """Create/update a Supplier with type + tax id, plus its linked Contact
+    (email/mobile) and Address — the ERPNext way. Handles both new and edit."""
+    data = _loads(data)
+    name = data.get("name")
+    if not name:
+        if not frappe.has_permission("Supplier", "create"):
+            frappe.throw(_("You are not allowed to create suppliers."))
+        doc = frappe.new_doc("Supplier")
+    else:
+        doc = frappe.get_doc("Supplier", name)
+        doc.check_permission("write")
+
+    sname = (data.get("supplier_name") or "").strip()
+    if not sname:
+        frappe.throw(_("Supplier name is required."))
+    doc.supplier_name = sname
+    if data.get("supplier_group"):
+        doc.supplier_group = data.get("supplier_group")
+    doc.supplier_type = data.get("supplier_type") or doc.get("supplier_type") or "Company"
+    if "tax_id" in data:
+        doc.tax_id = (data.get("tax_id") or "").strip() or None
+    doc.flags.ignore_permissions = True
+    doc.save()
+    supplier = doc.name
+
+    _upsert_supplier_contact(supplier, sname, data.get("email_id"), data.get("mobile_no"))
+    _upsert_supplier_address(supplier, sname, data.get("address"))
+
+    frappe.db.commit()
+    return {"name": supplier}
+
+
 @frappe.whitelist()
 def payment_detail(name):
     doc = frappe.get_doc("Procureflow Payment Entry", name)
@@ -1876,6 +2148,8 @@ def payment_detail(name):
         "project": doc.get("project"),
         "company": doc.get("company"),
         "purchase_receipt": doc.purchase_receipt,
+        "purchase_order": doc.get("purchase_order"),
+        "is_advance": bool(doc.get("purchase_order") and not doc.purchase_receipt),
         "previous_paid_amount": doc.get("previous_paid_amount"),
         "outstanding_amount": doc.get("outstanding_amount"),
         "amount": doc.amount,
@@ -2442,47 +2716,111 @@ def _rb_grn_register(f):
     return _D.get_payment_dashboard_receipts(pf, limit=10000)
 
 
+def _po_outstanding_rows(f):
+    """Per APPROVED (docstatus 1) Purchase Order: value / received / paid and the
+    two outstanding figures, netting ALL payments (PO advances + receipt payments).
+
+      * Outstanding vs PO = PO value - (advance + receipt payments)
+        -> order-level liability; visible even before any receipt is entered.
+      * Outstanding vs PR = received value - (payments applied to receipts)
+        -> what is actually due on goods already delivered (0 with no receipt).
+    An advance is a PO-level credit auto-allocated to the PO's receipts
+    oldest-first (see advance.py); the same allocation is mirrored here so the
+    per-receipt due == what the receipt pages show. Shared by the Outstanding &
+    Ageing and Outstanding Supplier Payments reports. Rows with nothing owed on
+    either basis are dropped. `days_outstanding` = days since the PO date.
+    """
+    from procureflow import advance as _adv
+    from procureflow.api import get_procureflow_paid_amount
+
+    today = getdate(nowdate())
+    filters = {"docstatus": 1}
+    _date_between(filters, "transaction_date", f["from_date"], f["to_date"])
+    if f["supplier"]:
+        filters["supplier"] = f["supplier"]
+    _scope_project(filters, "custom_project_name", f["project"])
+    pos = frappe.get_all(
+        "Purchase Order", filters=filters,
+        fields=["name", "transaction_date", "supplier", "custom_project_name",
+                "custom_test_company_", "rounded_total", "grand_total"],
+        order_by="transaction_date asc, creation asc", limit_page_length=0)
+
+    out = []
+    for p in pos:
+        po = p["name"]
+        committed = flt(p.get("rounded_total")) or flt(p.get("grand_total"))
+        advance = _adv.get_po_advance_total(po)
+        pool = advance
+        received = direct = pr_out = 0.0
+        for pr in _adv._po_submitted_receipts(po):
+            t = _adv._pr_total(pr)
+            d = get_procureflow_paid_amount(pr)
+            a = min(pool, max(t - d, 0.0))
+            pool -= a
+            received += t
+            direct += d
+            pr_out += max(t - d - a, 0.0)
+        total_paid = advance + direct
+        po_out = max(committed - total_paid, 0.0)
+        if po_out <= 0.005 and pr_out <= 0.005:
+            continue
+        td = p.get("transaction_date")
+        days = (today - getdate(td)).days if td else 0
+        out.append({
+            "purchase_order": po,
+            "transaction_date": td,
+            "supplier": p.get("supplier"),
+            "project": p.get("custom_project_name"),
+            "company": p.get("custom_test_company_"),
+            "po_value": committed,
+            "received_value": received,
+            "advance_paid": advance,
+            "paid_amount": total_paid,
+            "po_outstanding": po_out,
+            "pr_outstanding": pr_out,
+            "days_outstanding": days,
+        })
+    return out
+
+
 def _rb_payment_worklist(f):
-    rows = [r for r in _rb_grn_register(f) if flt(r.get("outstanding_amount")) > 0]
-    rows.sort(key=lambda r: (r.get("receipt_date") or ""))
+    """Supplier payments still owed, per PO, OLDEST FIRST — a worklist for AP.
+    Order-level (vs PO) and received-goods (vs PR) outstanding + payment progress,
+    netting advances + receipt payments (see _po_outstanding_rows)."""
+    rows = _po_outstanding_rows(f)
+    for r in rows:
+        pv = r["po_value"] or 0.0
+        r["progress_percent"] = round(r["paid_amount"] / pv * 100, 1) if pv else 0.0
+        if r["po_outstanding"] <= 0.005:
+            r["payment_status"] = "Fully Paid"
+        elif r["paid_amount"] > 0.005:
+            r["payment_status"] = "Partially Paid"
+        else:
+            r["payment_status"] = "Not Paid"
+    rows.sort(key=lambda r: (str(r.get("transaction_date") or ""), -r["po_outstanding"]))
     return rows
 
 
 def _rb_outstanding_ageing(f):
-    today = getdate(nowdate())
-    out = []
-    for r in _rb_grn_register(f):
-        o = flt(r.get("outstanding_amount"))
-        if o <= 0:
-            continue
-        rd = r.get("receipt_date")
-        days = (today - getdate(rd)).days if rd else 0
-        bucket = "0-30" if days <= 30 else "31-60" if days <= 60 else "61-90" if days <= 90 else "90+"
-        out.append({**r, "days_outstanding": days, "bucket": bucket})
+    """Per-PO outstanding (see _po_outstanding_rows) aged by PO date into
+    0-30 / 31-60 / 61-90 / 90+ buckets; sorted by amount owed vs the PO."""
+    rows = _po_outstanding_rows(f)
+    for r in rows:
+        d = r["days_outstanding"]
+        r["bucket"] = "0-30" if d <= 30 else "31-60" if d <= 60 else "61-90" if d <= 90 else "90+"
     want = f.get("bucket")
     if want and want != "all":
-        out = [r for r in out if r["bucket"] == want]
-    out.sort(key=lambda r: -r["days_outstanding"])
-    # Attach the items bought on each receipt, so it's clear what each pending
-    # payment is against (one batched query for all receipts in the result).
-    pr_names = list({r.get("purchase_receipt") for r in out if r.get("purchase_receipt")})
-    if pr_names:
-        imap = defaultdict(list)
-        for it in frappe.get_all(
-            "Purchase Receipt Item",
-            filters={"parent": ["in", pr_names]},
-            fields=["parent", "item_name", "item_code"],
-            order_by="idx asc",
-            limit_page_length=0,
-        ):
-            imap[it["parent"]].append(it.get("item_name") or it.get("item_code"))
-        for r in out:
-            r["items"] = ", ".join(imap.get(r.get("purchase_receipt"), []))
-    return out
+        rows = [r for r in rows if r["bucket"] == want]
+    rows.sort(key=lambda r: (-r["po_outstanding"], -r["days_outstanding"]))
+    return rows
 
 
 def _rb_payment_register(f):
     filters = _D.get_dashboard_filters(project=f["project"], from_date=f["from_date"], to_date=f["to_date"])
+    # LEFT JOIN so PO ADVANCE payments (which have no receipt) are included too;
+    # supplier/project fall back to the payment entry's own fields for advances.
+    proj_expr = "coalesce(pr.custom_project_name, pe.project)"
+    sup_expr = "coalesce(pr.supplier, pe.supplier)"
     cond = ["pe.docstatus = 1"]
     vals = {}
     if f["from_date"] and f["to_date"]:
@@ -2490,28 +2828,31 @@ def _rb_payment_register(f):
         vals["fd"] = f["from_date"]
         vals["td"] = f["to_date"]
     if f["supplier"]:
-        cond.append("pr.supplier = %(sup)s")
+        cond.append(sup_expr + " = %(sup)s")
         vals["sup"] = f["supplier"]
     scope = filters.get("scope") or {}
     if not scope.get("see_all", True):
         allowed = scope.get("projects") or ["__no_access__"]
         if f["project"] and f["project"] in allowed:
-            cond.append("pr.custom_project_name = %(pj)s")
+            cond.append(proj_expr + " = %(pj)s")
             vals["pj"] = f["project"]
         else:
-            cond.append("pr.custom_project_name in %(pjs)s")
+            cond.append(proj_expr + " in %(pjs)s")
             vals["pjs"] = tuple(allowed)
     elif f["project"]:
-        cond.append("pr.custom_project_name = %(pj)s")
+        cond.append(proj_expr + " = %(pj)s")
         vals["pj"] = f["project"]
     where = " and ".join(cond)
-    return frappe.db.sql(
-        "select pe.name, pe.payment_date, pr.supplier, pr.custom_project_name project, "
-        "pe.purchase_receipt, pe.amount "
+    rows = frappe.db.sql(
+        "select pe.name, pe.payment_date, " + sup_expr + " supplier, " + proj_expr + " project, "
+        "pe.purchase_receipt, pe.purchase_order, pe.amount "
         "from `tabProcureflow Payment Entry` pe "
-        "join `tabPurchase Receipt` pr on pr.name = pe.purchase_receipt "
+        "left join `tabPurchase Receipt` pr on pr.name = pe.purchase_receipt "
         "where " + where + " order by pe.payment_date desc, pe.creation desc limit 5000",
         vals, as_dict=True)
+    for r in rows:
+        r["reference"] = r.get("purchase_receipt") or ((r.get("purchase_order") or "") + "  · advance")
+    return rows
 
 
 def _rb_supplier_spend(f):
@@ -2618,19 +2959,25 @@ _REPORTS = {
         ("total_amount", "Grand Total", "money"), ("paid_amount", "Paid", "money"),
         ("outstanding_amount", "Outstanding", "money"), ("payment_status", "Payment", "text")]),
     "payment-worklist": (_rb_payment_worklist, [
-        ("purchase_receipt", "Receipt", "text"), ("supplier", "Supplier", "text"), ("project", "Project", "text"),
-        ("receipt_date", "Receipt Date", "date"), ("total_amount", "Total", "money"),
-        ("paid_amount", "Paid", "money"), ("outstanding_amount", "Outstanding", "money"),
+        ("purchase_order", "PO No.", "text"), ("transaction_date", "PO Date", "date"),
+        ("supplier", "Supplier", "text"), ("project", "Project", "text"),
+        ("po_value", "PO Value", "money"), ("received_value", "Received", "money"),
+        ("paid_amount", "Paid", "money"),
+        ("po_outstanding", "Outstanding vs PO", "money"),
+        ("pr_outstanding", "Outstanding vs PR", "money"),
         ("progress_percent", "Progress", "pct"), ("payment_status", "Status", "text")]),
     "payment-register": (_rb_payment_register, [
         ("name", "Payment No.", "text"), ("payment_date", "Date", "date"), ("supplier", "Supplier", "text"),
-        ("project", "Project", "text"), ("purchase_receipt", "Receipt", "text"), ("amount", "Amount", "money")]),
+        ("project", "Project", "text"), ("reference", "Against", "text"), ("amount", "Amount", "money")]),
     "outstanding-ageing": (_rb_outstanding_ageing, [
-        ("purchase_receipt", "Receipt", "text"), ("supplier", "Supplier", "text"), ("project", "Project", "text"),
-        ("items", "Items", "text"),
-        ("receipt_date", "Posting Date", "date"), ("days_outstanding", "Days", "num"),
-        ("total_amount", "Total", "money"), ("paid_amount", "Paid", "money"),
-        ("outstanding_amount", "Outstanding", "money"), ("bucket", "Ageing", "text")]),
+        ("purchase_order", "PO No.", "text"), ("transaction_date", "PO Date", "date"),
+        ("supplier", "Supplier", "text"), ("project", "Project", "text"),
+        ("company", "Company", "text"),
+        ("po_value", "PO Value", "money"), ("received_value", "Received", "money"),
+        ("paid_amount", "Paid", "money"),
+        ("po_outstanding", "Outstanding vs PO", "money"),
+        ("pr_outstanding", "Outstanding vs PR", "money"),
+        ("days_outstanding", "Days", "num"), ("bucket", "Ageing", "text")]),
     "supplier-spend": (_rb_supplier_spend, [
         ("supplier", "Supplier", "text"), ("po_count", "POs", "num"), ("total_spend", "Spend", "money"),
         ("pct", "% Spend", "pct"), ("cumulative_pct", "Cumulative %", "pct"), ("outstanding", "Outstanding", "money")]),

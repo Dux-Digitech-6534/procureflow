@@ -110,9 +110,12 @@ export function MNewRequest() {
 		setLines([]);
 	}
 	function addItem(code: string) {
-		if (!code || lines.some((l) => l.item_code === code)) return;
+		if (!code) return;
 		const o = itemOptions.find((x) => x.value === code);
 		if (!o) return;
+		// The same item may sit on several lines (same material, different
+		// specification/brand) — nudge the user to tell the lines apart.
+		if (lines.some((l) => l.item_code === code)) toast.success(t('nr.dupItem'));
 		setTouched(true);
 		setLines((ls) => [
 			...ls,
@@ -266,7 +269,7 @@ export function MNewRequest() {
 						/>
 					</div>
 					{lines.map((l, i) => (
-						<div className="item" key={l.item_code}>
+						<div className="item" key={i}>
 							<div className="ih">
 								<div className="inm">
 									<div className="t1">{l.item_name}</div>

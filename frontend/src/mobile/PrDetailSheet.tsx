@@ -70,6 +70,12 @@ export function PrDetailSheet({ name, onClose }: { name: string; onClose: () => 
 								<span className="k">{t('d.paid')}</span>
 								<span className="v">{fmtMoney(d.paid, 'INR')}</span>
 							</div>
+							{d.advance_applied > 0 && (
+								<div className="fct">
+									<span className="k">{t('d.fromAdvance')}</span>
+									<span className="v">{fmtMoney(d.advance_applied, 'INR')}</span>
+								</div>
+							)}
 							<div className="fct" style={{ fontWeight: 700 }}>
 								<span className="k">{t('d.outstanding')}</span>
 								<span className="v">{fmtMoney(d.outstanding, 'INR')}</span>

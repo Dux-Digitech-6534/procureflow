@@ -112,7 +112,7 @@ export function DocLifecycleActions({
 			{confirmDelete && (
 				<Modal title={`Delete ${noun} — ${name}`} icon="warning" onClose={() => setConfirmDelete(false)}>
 					<div style={{ padding: '14px 18px', fontSize: 13.5, color: 'var(--fg-2)', lineHeight: 1.55 }}>
-						This permanently deletes the cancelled {noun} <b>{name}</b>. This cannot be undone.
+						This permanently deletes {noun} <b>{name}</b>. This cannot be undone.
 					</div>
 					<div className="formfoot">
 						{err && <span className="ferr">{err}</span>}

@@ -10,28 +10,47 @@ from procureflow.api import populate_purchase_receipt_project_company_from_purch
 
 
 class ProcureflowPaymentEntry(Document):
+    @property
+    def is_advance(self):
+        """An advance is paid against a Purchase Order (no receipt yet)."""
+        return bool(self.get("purchase_order") and not self.get("purchase_receipt"))
+
     def validate(self):
         self.validate_required_values()
         if self.docstatus == 0:
+            if self.is_advance:
+                self.validate_and_set_purchase_order_values()
+                self.set_advance_summary()
+                self.validate_advance_amount()
+            else:
+                self.validate_and_set_purchase_receipt_values()
+                self.set_payment_summary()
+                self.validate_amount()
+
+    def before_submit(self):
+        self.validate_required_values()
+        if self.is_advance:
+            self.validate_and_set_purchase_order_values()
+            self.set_advance_summary()
+            self.validate_advance_amount()
+        else:
             self.validate_and_set_purchase_receipt_values()
             self.set_payment_summary()
             self.validate_amount()
 
-    def before_submit(self):
-        self.validate_required_values()
-        self.validate_and_set_purchase_receipt_values()
-        self.set_payment_summary()
-        self.validate_amount()
+    def _recompute(self):
+        from procureflow.advance import recompute_for_payment
+
+        recompute_for_payment(self)
 
     def on_submit(self):
-        update_purchase_receipt_payment_status(self.purchase_receipt)
+        self._recompute()
 
     def on_cancel(self):
-        update_purchase_receipt_payment_status(self.purchase_receipt)
+        self._recompute()
 
     def on_trash(self):
-        if self.purchase_receipt:
-            update_purchase_receipt_payment_status(self.purchase_receipt)
+        self._recompute()
 
     def validate_required_values(self):
         if not self.payment_date:
@@ -40,8 +59,54 @@ class ProcureflowPaymentEntry(Document):
         if getdate(self.payment_date) > getdate(nowdate()):
             frappe.throw(_("Payment date cannot be in the future."))
 
-        if not self.purchase_receipt:
-            frappe.throw(_("Purchase Receipt is required."))
+        if not self.get("purchase_receipt") and not self.get("purchase_order"):
+            frappe.throw(_("Link either a Purchase Receipt (payment) or a Purchase Order (advance)."))
+        if self.get("purchase_receipt") and self.get("purchase_order"):
+            frappe.throw(_("A payment entry links a Purchase Receipt OR a Purchase Order — not both."))
+
+    # --- Advance (against a Purchase Order) -----------------------------------
+
+    def validate_and_set_purchase_order_values(self):
+        po = frappe.get_doc("Purchase Order", self.purchase_order)
+        if po.docstatus != 1:
+            frappe.throw(_("An advance can be paid only against an approved (submitted) Purchase Order."))
+
+        if not self.supplier:
+            self.supplier = po.supplier
+        if not self.project:
+            self.project = po.get("custom_project_name")
+        if not self.company:
+            self.company = po.get("custom_test_company_") or frappe.db.get_value(
+                "Project Master", po.get("custom_project_name"), "company_name"
+            )
+
+        if self.supplier != po.supplier:
+            frappe.throw(_("Supplier must match the Purchase Order supplier."))
+
+    def set_advance_summary(self):
+        from procureflow.advance import advance_cap_remaining, get_po_advance_total
+
+        self.previous_paid_amount = get_po_advance_total(self.purchase_order, exclude_name=self.name)
+        remaining = advance_cap_remaining(self.purchase_order, exclude_name=self.name)
+        # outstanding_amount here means "advance capacity still available" (uncapped -> blank)
+        self.outstanding_amount = remaining if remaining is not None else 0
+
+    def validate_advance_amount(self):
+        from procureflow.advance import advance_cap_remaining
+
+        if flt(self.amount) <= 0:
+            frappe.throw(_("Amount must be greater than 0."))
+
+        remaining = advance_cap_remaining(self.purchase_order, exclude_name=self.name)
+        if remaining is not None and flt(self.amount) > flt(remaining) + 0.01:
+            frappe.throw(
+                _(
+                    "Advance would exceed the allowed limit for this Purchase Order. "
+                    "Remaining advance capacity: {0}, this amount: {1}."
+                ).format(frappe.bold(flt(remaining)), frappe.bold(flt(self.amount)))
+            )
+
+    # --- Payment (against a Purchase Receipt) ---------------------------------
 
     def validate_and_set_purchase_receipt_values(self):
         purchase_receipt = frappe.get_doc("Purchase Receipt", self.purchase_receipt)
@@ -87,11 +152,18 @@ class ProcureflowPaymentEntry(Document):
         self.company = company
 
     def set_payment_summary(self):
+        from procureflow.advance import po_advance_allocation
+        from procureflow.api import get_purchase_receipt_purchase_order
+
         total = get_purchase_receipt_total(self.purchase_receipt)
         paid = get_submitted_paid_amount(self.purchase_receipt, exclude_name=self.name)
-        outstanding = max(total - paid, 0)
+        # Advance already allocated to THIS receipt reduces what a direct payment
+        # still needs to cover (advance + direct must never over-cover a receipt).
+        po = get_purchase_receipt_purchase_order(frappe.get_doc("Purchase Receipt", self.purchase_receipt))
+        adv = flt(po_advance_allocation(po)["per_pr"].get(self.purchase_receipt, 0.0)) if po else 0.0
+        outstanding = max(total - paid - adv, 0)
 
-        self.previous_paid_amount = paid
+        self.previous_paid_amount = paid + adv
         self.outstanding_amount = outstanding
 
         if not self.amount:

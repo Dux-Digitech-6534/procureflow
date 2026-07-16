@@ -59,6 +59,9 @@ doc_events = {
         'before_submit': 'procureflow.signature_api.set_purchase_order_company_signature',
     },
     'Purchase Receipt': {
+        # A receipt's GST must mirror its source PO — ERPNext otherwise re-applies
+        # the Item master's tax template (no-GST PO was producing a GST receipt).
+        'validate': 'procureflow.purchase_tax.purchase_receipt_validate',
         'before_save': [
             'procureflow.api.populate_purchase_receipt_project_company_from_purchase_order',
             'procureflow.api.stamp_purchase_receipt_attachment_datetimes',
@@ -72,6 +75,14 @@ doc_events = {
         # at the temp 'new-purchase-receipt-…' name and would otherwise vanish).
         'after_insert': [
             'procureflow.api.adopt_orphan_purchase_receipt_files',
+        ],
+        # A receipt arriving (or being cancelled) changes how the PO's advance
+        # credit is allocated across its receipts — recompute payment status.
+        'on_submit': [
+            'procureflow.advance.recompute_on_pr_change',
+        ],
+        'on_cancel': [
+            'procureflow.advance.recompute_on_pr_change',
         ],
     },
     # Sidebar attachments only insert a File (no receipt save at all) — the only
@@ -135,7 +146,11 @@ fixtures = [
                 "Purchase Receipt-custom_payment_status",
                 "Purchase Receipt-custom_total_paid_amount",
                 "Purchase Receipt-custom_outstanding_amount",
-                "Purchase Receipt Item-custom_remark"
+                "Purchase Receipt Item-custom_remark",
+
+                # Advance payments: a payment entry may link a Purchase Order
+                # (advance) instead of a receipt.
+                "Procureflow Payment Entry-purchase_order"
 
             ]]
         ]
@@ -184,7 +199,25 @@ fixtures = [
                 "Purchase Order Item-rate-label",
                 "Purchase Order Item-amount-label",
                 "Purchase Order Item-schedule_date-columns",
-                "Purchase Order Item-rate-columns"
+                "Purchase Order Item-rate-columns",
+
+                # Rate precision bumped to 6dp so a tax-INCLUSIVE per-unit rate
+                # (rate derived = rate_with_tax / (1+gst)) is not collapsed to 2dp
+                # on save. At 2dp, qty * derived-rate drifted from the supplier's
+                # quoted inclusive total (e.g. 6627 x 65 = 4,30,755 came out
+                # 4,30,717) and the entered w/tax rate reappeared as 64.99.
+                "Purchase Order Item-rate-precision",
+                "Purchase Order Item-base_rate-precision",
+                "Purchase Order Item-net_rate-precision",
+                "Purchase Order Item-base_net_rate-precision",
+                "Purchase Receipt Item-rate-precision",
+                "Purchase Receipt Item-base_rate-precision",
+                "Purchase Receipt Item-net_rate-precision",
+                "Purchase Receipt Item-base_net_rate-precision",
+
+                # Advance payments: a Purchase Order advance has no receipt, so
+                # the receipt link must be optional.
+                "Procureflow Payment Entry-purchase_receipt-reqd"
             ]]
         ]
     }

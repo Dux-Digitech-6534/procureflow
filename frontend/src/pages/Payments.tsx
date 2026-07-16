@@ -52,7 +52,7 @@ export function Payments() {
 
 	const historyCols: Column<PaymentListRow>[] = [
 		{ key: 'name', header: 'Payment', sortValue: (r) => r.name, render: (r) => <span className="id">{r.name}</span> },
-		{ key: 'receipt', header: 'Receipt', sortValue: (r) => r.purchase_receipt, render: (r) => <span className="id">{r.purchase_receipt}</span> },
+		{ key: 'receipt', header: 'Against', sortValue: (r) => r.purchase_receipt || r.purchase_order || '', render: (r) => r.purchase_receipt ? <span className="id">{r.purchase_receipt}</span> : <span className="id">{r.purchase_order} <span className="tag">advance</span></span> },
 		{ key: 'supplier', header: 'Supplier', sortValue: (r) => r.supplier, render: (r) => <span className="c1">{r.supplier}</span> },
 		{ key: 'project', header: 'Project', sortValue: (r) => r.project, render: (r) => <span className="c2">{r.project ?? '—'}</span> },
 		{ key: 'amount', header: 'Amount', align: 'right', sortValue: (r) => r.amount, render: (r) => <span className="num">{fmtMoney(r.amount, 'INR')}</span> },
@@ -96,7 +96,7 @@ export function Payments() {
 					columns={historyCols}
 					rowKey={(r) => r.name}
 					onRowClick={(r) => navigate('/payments/' + r.name)}
-					searchText={(r) => `${r.name} ${r.purchase_receipt} ${r.supplier} ${r.project ?? ''}`}
+					searchText={(r) => `${r.name} ${r.purchase_receipt ?? ''} ${r.purchase_order ?? ''} ${r.supplier} ${r.project ?? ''}`}
 					searchPlaceholder="Search payment / receipt / supplier…"
 					filters={historyFilters}
 					loading={payRes.isLoading}

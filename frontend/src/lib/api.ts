@@ -27,6 +27,7 @@ export const API = {
 	prList: 'procureflow.react_api.pr_list',
 	prDetail: 'procureflow.react_api.pr_detail',
 	savePayment: 'procureflow.react_api.save_payment',
+	advancePaymentDefaults: 'procureflow.react_api.advance_payment_defaults',
 	paymentList: 'procureflow.react_api.payment_list',
 	paymentDetail: 'procureflow.react_api.payment_detail',
 	docLinks: 'procureflow.react_api.doc_links',
@@ -37,6 +38,8 @@ export const API = {
 	updateMaster: 'procureflow.react_api.update_master',
 	createMaster: 'procureflow.react_api.create_master',
 	saveItem: 'procureflow.react_api.save_item',
+	saveSupplier: 'procureflow.react_api.save_supplier',
+	supplierDetail: 'procureflow.react_api.supplier_detail',
 	assignableRoles: 'procureflow.react_api.assignable_roles',
 	usersList: 'procureflow.react_api.users_list',
 	createUser: 'procureflow.react_api.create_user',
@@ -44,6 +47,8 @@ export const API = {
 	resetUserPassword: 'procureflow.react_api.reset_user_password',
 	getTolerance: 'procureflow.react_api.get_tolerance',
 	saveTolerance: 'procureflow.react_api.save_tolerance',
+	getAdvanceSettings: 'procureflow.react_api.get_advance_settings',
+	saveAdvanceSettings: 'procureflow.react_api.save_advance_settings',
 	approvalRoutingContext: 'procureflow.react_api.approval_routing_context',
 	approvalMappings: 'procureflow.react_api.approval_mappings',
 	approvalMappingOptions: 'procureflow.react_api.approval_mapping_options',
@@ -485,6 +490,12 @@ export interface PoDetail extends DocActionState {
 	taxes: PoTaxRow[];
 	items: PoLine[];
 	print_format: string | null;
+	// Advance payments against this PO (auto-allocated to receipts oldest-first).
+	advance_paid: number;
+	advance_applied: number;
+	advance_unapplied: number;
+	advance_cap_remaining: number | null;
+	can_pay_advance: boolean;
 }
 
 export interface SavePoResult {
@@ -630,7 +641,8 @@ export interface PaymentDefaults {
 
 export interface PaymentListRow {
 	name: string;
-	purchase_receipt: string;
+	purchase_receipt: string | null;
+	purchase_order: string | null;
 	supplier: string;
 	project: string | null;
 	amount: number;
@@ -657,6 +669,8 @@ export interface PrDetail {
 	docstatus: number;
 	total: number;
 	paid: number;
+	direct_paid: number;
+	advance_applied: number;
 	outstanding: number;
 	material_image: string | null;
 	invoice_image: string | null;
@@ -670,7 +684,9 @@ export interface PaymentDetail {
 	supplier: string;
 	project: string | null;
 	company: string | null;
-	purchase_receipt: string;
+	purchase_receipt: string | null;
+	purchase_order: string | null;
+	is_advance: boolean;
 	previous_paid_amount: number | null;
 	outstanding_amount: number | null;
 	amount: number;
